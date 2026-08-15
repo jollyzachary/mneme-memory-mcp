@@ -1,7 +1,7 @@
 # Shared memory and optional delegation
 
-Mneme's primary job is shared memory. Trusted MCP-compatible agents read and
-write the same local store directly.
+Mneme gives trusted MCP-compatible agents direct access to one governed local
+store.
 
 ```text
 Agent 1 ─┐
@@ -16,7 +16,7 @@ governed memory layer.
 ## Shared memory
 
 Connected clients use the same MCP server command and `MNEME_HOME`. The default
-global home contains:
+shared home contains:
 
 ```text
 ~/.hermes/memory_store.db
@@ -49,8 +49,8 @@ When enabled, the server registers:
 | `delegate_to_claude` | Run a bounded Claude Code task inside the bridge root |
 | `delegate_to_codex` | Run a bounded Codex task inside the bridge root |
 
-Working directories must remain inside `MNEME_BRIDGE_ROOT`. The public bridge
-does not expose unrestricted Codex execution modes. Child processes receive an
+Working directories must remain inside `MNEME_BRIDGE_ROOT`. Codex delegation is
+limited to the bridge's supported sandbox modes. Child processes receive an
 allowlisted environment, diagnostic command arguments are redacted, and
 returned output is bounded.
 

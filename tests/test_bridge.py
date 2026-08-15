@@ -104,14 +104,12 @@ class AgentBridgeTest(unittest.TestCase):
         self.assertIn("FAKE_AGENT", result.stdout)
         self.assertIn("Another shared fact.", result.stdout)
         self.assertIn("read-only", result.stdout)
-        # `codex exec` is non-interactive (approval is always "never"); current
-        # Codex CLIs error out if --ask-for-approval is passed, so it must not be.
+        # `codex exec` rejects the interactive approval flag.
         self.assertNotIn("--ask-for-approval", result.stdout)
         self.assertIn("--skip-git-repo-check", result.stdout)
 
     def test_format_tolerates_missing_streams(self) -> None:
-        # A crashed/undecodable reader thread can leave stdout/stderr as None;
-        # format() must not raise AttributeError on them.
+        # Formatting remains stable when a subprocess produces no captured stream.
         run = AgentRun(
             agent="codex",
             command=["codex", "exec"],

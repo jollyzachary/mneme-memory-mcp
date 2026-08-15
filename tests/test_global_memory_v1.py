@@ -105,24 +105,27 @@ class GlobalMemoryV1Test(unittest.TestCase):
     def test_candidate_requires_promotion_for_briefing(self) -> None:
         store = self.make_store()
         candidate = store.add_fact(
-            "Captured candidate says the launch command is dz-dev.",
+            "Captured candidate says the launch command is staging-runner.",
             source="capture",
             scope="global",
         )
 
         self.assertEqual(store._get_fact(candidate).state, "candidate")
         self.assertNotIn(
-            "dz-dev", store.briefing(query="launch command", scope="global")
+            "staging-runner", store.briefing(query="launch command", scope="global")
         )
         self.assertIn(candidate, [fact.fact_id for fact in store.review_candidates()])
 
         promoted = store.set_state(candidate, state="trusted", source="human")
         self.assertIsNotNone(promoted)
-        self.assertIn("dz-dev", store.briefing(query="launch command", scope="global"))
+        self.assertIn(
+            "staging-runner",
+            store.briefing(query="launch command", scope="global"),
+        )
 
         rejected = store.set_state(candidate, state="rejected", source="human")
         self.assertEqual(rejected.state, "rejected")
-        self.assertFalse(store.search("dz-dev", scope="global"))
+        self.assertFalse(store.search("staging-runner", scope="global"))
 
     def test_secret_like_content_is_rejected(self) -> None:
         store = self.make_store()

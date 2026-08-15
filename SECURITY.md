@@ -1,7 +1,7 @@
 # Security Policy
 
-Mneme stores private local context and can be connected to powerful AI clients.
-Security reports are taken seriously.
+Mneme stores private local context and connects to MCP clients. This policy
+defines the supported security boundary and the private reporting process.
 
 ## Supported version
 

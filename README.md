@@ -56,9 +56,10 @@ index. If it is unavailable, Mneme can continue from SQLite.
 
 Manual writes enter the trusted working set. Automated capture enters as a
 candidate and must be promoted before it appears in generated context. Content
-that resembles prompt injection is quarantined; content that resembles a secret
-is rejected before persistence. Default search and list operations return
-trusted memory only; candidate review is an explicit operation.
+that resembles prompt injection is quarantined. Secret-like durable writes are
+rejected, while conversation capture applies credential redaction before
+storing episodic text. Default search and list operations return trusted memory
+only; candidate review is an explicit operation.
 
 ### Hybrid retrieval
 
@@ -195,9 +196,9 @@ a connected client sends retrieved context to its configured model provider.
 
 ## Documentation
 
-- [System architecture](docs/global-memory-architecture.md)
+- [System architecture](docs/architecture.md)
 - [Client continuity](docs/continuity.md)
-- [Shared memory and optional delegation](docs/agent-mesh.md)
+- [Shared memory and optional delegation](docs/shared-memory.md)
 - [PostgreSQL retrieval](docs/postgres-retrieval.md)
 
 ## Development

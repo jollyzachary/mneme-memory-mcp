@@ -29,13 +29,13 @@ Mneme Memory MCP installer
 Usage:
   ./scripts/install.sh [--profile global|project|server] [options]
 
-This installs Mneme into a managed user-data directory, not the Desktop or
-repo checkout. You must choose a setup profile so Mneme never silently assumes
-machine-wide memory. Client configuration is best-effort.
+Mneme installs into a managed user-data directory. Choose a setup profile to
+set the memory scope and client configuration. Client configuration is
+best-effort.
 
 Setup profiles:
-  global   Machine-wide persistent memory in ~/.hermes, with global Claude/Codex
-           instructions, Claude startup injection, and local conversation capture.
+  global   Shared persistent memory in ~/.hermes, with supported client
+           configuration, startup context, and local conversation capture.
   project  Project/env-scoped memory from .env, defaulting to a project folder
            under ~/.local/share/mneme-memory-mcp/projects. This configures MCP
            clients without installing global memory instructions.
@@ -229,17 +229,15 @@ choose_profile() {
 Choose a Mneme setup profile:
 
   1) Global persistent memory
-     Best for a personal machine. Claude and Codex always start from the
-     same ~/.hermes memory layer, including fresh chats.
+     Shared memory and continuity hooks for supported clients.
 
   2) Project/env-scoped memory
-     Best for sharing the repo or isolating work. Memory comes from .env
-     and defaults to ~/.local/share/mneme-memory-mcp/projects/<repo>.
-     No global Claude/Codex instructions are added.
+     An isolated memory home for this workspace. Memory comes from .env and
+     defaults to ~/.local/share/mneme-memory-mcp/projects/<repo>.
 
   3) Server only / manual wiring
-     Installs Mneme locally and prints config. No client, plugin, or global
-     memory changes.
+     Installs Mneme locally and prints config without client configuration or
+     continuity hooks.
 
 EOF
     printf 'Select 1, 2, or 3: '
@@ -264,7 +262,7 @@ EOF
 No Mneme setup profile was selected.
 
 Pass one of these profiles explicitly:
-  global   machine-wide memory and global Claude/Codex instructions
+  global   shared memory with supported client continuity
   project  project/env-scoped memory from .env
   server   server install only; manual wiring
 
@@ -440,12 +438,12 @@ configure_clients() {
 
 install_continuity() {
   if [ "$INSTALL_CONTINUITY" -ne 1 ]; then
-    echo "==> Skipping always-on memory continuity installation."
+    echo "==> Skipping client continuity installation."
     return 0
   fi
 
   run_optional \
-    "Installing always-on Mneme memory continuity for Codex and Claude" \
+    "Installing Mneme client continuity for Codex and Claude" \
     "$VENV_DIR/bin/mneme-memory-continuity" install --memory-home "$MNEME_HOME" --bin-dir "$VENV_DIR/bin"
 }
 
@@ -472,7 +470,7 @@ EOF
 
   if [ "$INSTALL_CONTINUITY" -eq 1 ]; then
     cat <<'EOF'
-- Always-on shared memory instructions for fresh Codex and Claude chats
+- Shared memory instructions for new Codex and Claude sessions
 - Claude SessionStart memory injection
 - Claude UserPromptSubmit per-prompt memory injection
 - Claude/Codex searchable conversation capture hooks

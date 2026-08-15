@@ -44,7 +44,7 @@ class HookContextTest(unittest.TestCase):
             tags="capture,codex,session-summary",
             source="capture",
         )
-        store.add("Real durable fact about the development build.", category="project")
+        store.add("Durable fact about the staging environment.", category="project")
 
         for prompt in ("", "session summary archived turns"):
             context = build_context(store=store, prompt=prompt)

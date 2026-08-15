@@ -49,7 +49,7 @@ def status_lines() -> list[str]:
                 f"{postgres.get('edges', 0)} edges"
             )
 
-    lines.extend(["", "Always-on memory continuity:"])
+    lines.extend(["", "Client continuity:"])
     lines.extend(f"  {line}" for line in continuity_status().lines())
 
     lines.extend(

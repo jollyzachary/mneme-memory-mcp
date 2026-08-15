@@ -98,16 +98,19 @@ class GovernanceTest(unittest.TestCase):
         the retrieval half of experience reuse."""
         store, _ = self.make()
         store.add(
-            "Strategy: when a SwiftUI panel button won't fire, route the click through the "
-            "native PanelInteractionSurface instead of fighting acceptsFirstMouse.",
+            "Strategy: when a desktop control does not receive input, inspect the native "
+            "event bridge before changing the view hierarchy.",
             target="memory",
             scope="global",
             memory_type="procedural",
-            tags="strategy,swiftui",
+            tags="strategy,desktop-ui",
         )
-        hits = [f.content for f in store.search("SwiftUI panel button", scope="global")]
+        hits = [
+            f.content
+            for f in store.search("desktop control input", scope="global")
+        ]
         self.assertTrue(
-            any("PanelInteractionSurface" in c for c in hits),
+            any("native event bridge" in c for c in hits),
             "a stored strategy should be retrievable for reuse",
         )
 

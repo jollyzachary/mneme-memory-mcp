@@ -24,21 +24,19 @@ class Case:
 
 
 FACTS = (
-    "Agent peers exchange messages through the local bridge protocol.",
-    "The canonical sample library is stored under /srv/media/samples.",
-    "A human reviewer performs interactive interface testing.",
-    "Publishing changes requires explicit maintainer approval.",
-    "The development build is the default target for requested product changes.",
+    "Agent peers exchange handoffs through shared local memory.",
+    "The sample library is stored under /srv/media/samples.",
+    "Release candidates receive interactive interface testing.",
+    "Publishing a package requires maintainer approval.",
+    "Changes are deployed to staging before production.",
 )
 
 CASES = (
-    Case("how do subagents communicate with one another", "local bridge protocol"),
-    Case("where is the canonical sample folder", "/srv/media/samples"),
-    Case(
-        "who performs graphical interface testing", "human reviewer performs interactive"
-    ),
-    Case("what authorizes publishing changes", "explicit maintainer approval"),
-    Case("which build should product changes target", "development build"),
+    Case("how do agents exchange project context", "shared local memory"),
+    Case("where is the sample folder", "/srv/media/samples"),
+    Case("which builds receive interface testing", "release candidates"),
+    Case("what authorizes package publishing", "maintainer approval"),
+    Case("where are changes deployed first", "staging"),
 )
 
 

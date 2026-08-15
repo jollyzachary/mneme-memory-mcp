@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 """Backfill local fact embeddings for hybrid retrieval.
 
-SAFETY: Never point --db at the live Mneme store without an explicit copy.
-The live path is typically ~/.hermes/memory_store.db (or $MNEME_DB_PATH /
-$MNEME_HOME/memory_store.db). This script refuses that path unless --allow-live
-is passed.
+The command accepts a scratch database by default. Writing to the configured
+Mneme store requires ``--allow-live``.
 
 Examples
 --------
-# Safe demo on a scratch copy:
+# Run against a scratch copy:
 cp ~/.hermes/memory_store.db /tmp/mneme-embed-scratch.db
 python scripts/backfill_embeddings.py --db /tmp/mneme-embed-scratch.db
 
@@ -38,7 +36,7 @@ def _live_db_candidates() -> list[Path]:
     )
     candidates.append((Path(home_raw).expanduser() / "memory_store.db").resolve())
     candidates.append(Path("~/.hermes/memory_store.db").expanduser().resolve())
-    # Dedupe while preserving order.
+    # Deduplicate while preserving order.
     seen: set[Path] = set()
     out: list[Path] = []
     for path in candidates:
@@ -95,7 +93,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 3
 
-    # Import after path checks so a missing optional dep still yields a clear msg.
+    # Import after path checks so dependency errors retain a clear target message.
     from mneme_memory_mcp.store import SharedMemoryStore, embeddings_available
 
     if not embeddings_available():

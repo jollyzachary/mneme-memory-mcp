@@ -363,9 +363,9 @@ class SharedMemoryStoreTest(unittest.TestCase):
             out: list[list[float]] = []
             for text in texts:
                 lower = text.lower()
-                # Panel-bridge / agent-communication cluster.
+                # Agent-communication cluster.
                 if (
-                    "panel bridge protocol" in lower
+                    "shared relay protocol" in lower
                     or "how do agents talk" in lower
                     or "agents talk to each other" in lower
                 ):
@@ -380,7 +380,7 @@ class SharedMemoryStoreTest(unittest.TestCase):
         try:
             store = self.make_store()
             target_id = store.add_fact(
-                "panel bridge protocol is how multi-agent boards exchange handoffs",
+                "shared relay protocol is how agents exchange handoffs",
                 source="manual",
                 trust_score=0.95,
                 scope="project",
@@ -410,7 +410,7 @@ class SharedMemoryStoreTest(unittest.TestCase):
             self.assertTrue(hits, "hybrid search should return results")
             hit_ids = [h.fact_id for h in hits]
             self.assertIn(target_id, hit_ids)
-            self.assertIn("panel bridge protocol", hits[0].content)
+            self.assertIn("shared relay protocol", hits[0].content)
             self.assertEqual(hits[0].fact_id, target_id)
             # Cosine channel ranked the paraphrase match; scaffolding kept it above the distractor.
             if distractor_id in hit_ids:

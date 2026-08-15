@@ -20,7 +20,7 @@ def store() -> SharedMemoryStore:
 
 @mcp.tool()
 def memory_summary() -> str:
-    """Return the always-on shared memory summary."""
+    """Return the generated trusted-memory summary."""
 
     return store().summary()
 

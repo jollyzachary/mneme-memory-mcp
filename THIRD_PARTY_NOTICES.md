@@ -1,8 +1,8 @@
 # Third-Party Notices
 
-Mneme Memory MCP is licensed under the MIT License. It interoperates with or can
-optionally install software maintained by other projects. Each dependency
-remains subject to its own license and terms.
+Mneme Memory MCP is licensed under the MIT License. It depends on and integrates
+with software maintained by other projects. Each component remains subject to
+its own license and terms.
 
 ## Python dependencies
 
@@ -28,5 +28,5 @@ before redistributing a derived container image.
 ## Client integrations
 
 MCP clients and optional local agent runtimes are separate projects. Mneme can
-configure supported clients after explicit user selection, but does not vendor
-or redistribute those clients.
+configure supported clients during installation, but does not vendor or
+redistribute them.

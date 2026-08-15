@@ -14,9 +14,8 @@ MAX_SUMMARY_CHARS = 7000
 MAX_FACT_CHARS = 1200
 MAX_RELEVANT_FACTS = 6
 
-# Task-contingent activation: the always-on working set (USER.md/MEMORY.md via
-# summary) stays small, and searchable facts enter the injected context only when
-# they match the prompt at hand — not as a recency dump.
+# Keep generated working sets small and add searchable facts only when they
+# match the current prompt.
 _STOPWORDS = frozenset(
     [
         "about",
@@ -199,7 +198,7 @@ def _recent_facts(store: SharedMemoryStore, limit: int) -> list[Fact]:
 
 
 def _is_noise(fact: Fact) -> bool:
-    """Capture-derived material is search-only; it never rides the always-on context."""
+    """Exclude capture-derived candidates from generated prompt context."""
     return (
         fact.state != "trusted"
         or fact.category == "conversation"

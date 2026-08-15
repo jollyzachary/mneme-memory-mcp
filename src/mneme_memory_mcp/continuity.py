@@ -78,9 +78,9 @@ class ContinuityStatus:
 
     def lines(self) -> list[str]:
         return [
-            f"Codex always-on memory instructions: {_ok(self.codex_instructions)} ({self.codex_agents})",
+            f"Codex startup memory instructions: {_ok(self.codex_instructions)} ({self.codex_agents})",
             f"Codex automatic memory capture: {_ok(self.codex_notify_capture)} ({self.codex_config})",
-            f"Claude always-on memory instructions: {_ok(self.claude_instructions)} ({self.claude_md})",
+            f"Claude startup memory instructions: {_ok(self.claude_instructions)} ({self.claude_md})",
             f"Claude SessionStart memory hook file: {_ok(self.claude_hook_file)} ({self.claude_hook})",
             f"Claude SessionStart memory hook configured: {_ok(self.claude_sessionstart_hook)} ({self.claude_settings})",
             f"Claude per-prompt memory hook file: {_ok(self.claude_prompt_hook_file)} ({self.claude_prompt_hook})",
@@ -192,7 +192,7 @@ Before a substantive answer, consult the shared memory layer so new chats inheri
 
 - `memory_summary` for the current USER.md and MEMORY.md context.
 - `memory_search` when the request may involve prior work, preferences, repo state, tools, people, or long-running projects.
-- `memory_add` for durable facts the user would reasonably expect future Codex, Claude, and Hermes sessions to remember.
+- `memory_add` for durable facts the user would reasonably expect future client sessions to remember.
 
 If MCP tools are unavailable, use the CLI fallback:
 
@@ -216,7 +216,7 @@ At the start of a new session, and before any substantive answer, consult the sh
 
 - `memory_summary` for the current USER.md and MEMORY.md context.
 - `memory_search` when the request may involve prior work, preferences, repo state, tools, people, or long-running projects.
-- `memory_add` for durable facts the user would reasonably expect future Claude, Codex, and Hermes sessions to remember.
+- `memory_add` for durable facts the user would reasonably expect future client sessions to remember.
 
 If MCP tools are unavailable, use the CLI fallback:
 
@@ -766,12 +766,12 @@ def _ok(value: bool) -> str:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mneme-memory-continuity",
-        description="Install or inspect Mneme always-on memory continuity.",
+        description="Install or inspect Mneme client continuity.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     install = subparsers.add_parser(
-        "install", help="Install always-on client continuity."
+        "install", help="Install client continuity."
     )
     install.add_argument("--memory-home", type=Path, default=None)
     install.add_argument("--bin-dir", type=Path, default=None)
@@ -788,10 +788,10 @@ def main(argv: list[str] | None = None) -> None:
     paths = default_paths(memory_home=args.memory_home, bin_dir=args.bin_dir)
     if args.command == "install":
         status = install_continuity(paths)
-        print("Mneme always-on memory continuity installed.")
+        print("Mneme client continuity installed.")
     else:
         status = continuity_status(paths)
-        print("Mneme always-on memory continuity status")
+        print("Mneme client continuity status")
     print("\n".join(status.lines()))
 
 

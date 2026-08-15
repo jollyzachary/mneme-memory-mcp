@@ -467,10 +467,9 @@ def _sanitize_text(value: Any) -> str:
     return text
 
 
-# Tool-call / hook markup that intermittently leaked into memory. Store-side
-# stripping only knows a few shapes and truncation can split tags mid-pattern,
-# so reject markup-bearing snippets outright — capture is low-trust episodic
-# material and a dropped snippet costs nothing.
+# Reject protocol and hook markup before episodic storage. Truncation can split
+# tag boundaries, so capture uses signature rejection in addition to store-side
+# normalization.
 _MARKUP_SIGNATURES = (
     "<parameter",
     "</parameter",

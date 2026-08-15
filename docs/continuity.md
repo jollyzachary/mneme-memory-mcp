@@ -26,7 +26,7 @@ The guided installers require an explicit profile:
 
 | Profile | Use case | Client configuration |
 | --- | --- | --- |
-| `global` | Shared memory for trusted clients on one personal machine | Installs supported client wiring and continuity hooks |
+| `global` | Shared memory for trusted clients on one workstation | Installs supported client wiring and continuity hooks |
 | `project` | An isolated memory home for one workspace | Configures the workspace without global continuity hooks |
 | `server` | Memory server only | Leaves client wiring to the operator |
 
@@ -42,8 +42,8 @@ Windows PowerShell:
 powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Profile server
 ```
 
-The installer does not choose a profile automatically. This prevents a package
-installation from silently modifying machine-wide client behavior.
+The installer requires a profile so changes to client configuration and
+continuity hooks are explicit.
 
 ## Global continuity
 

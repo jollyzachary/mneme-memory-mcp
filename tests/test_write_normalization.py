@@ -10,29 +10,34 @@ from mneme_memory_mcp.store import SharedMemoryStore
 
 class MarkupRejectionTest(unittest.TestCase):
     def test_capture_rejects_tool_markup(self) -> None:
-        self.assertFalse(_should_keep('some text then <parameter name="file_path">/x</parameter>'))
-        self.assertFalse(_should_keep("output with hookSpecificOutput payload inside it"))
-        self.assertTrue(_should_keep("a normal remembered decision about the development build"))
+        self.assertFalse(
+            _should_keep('some text then <parameter name="file_path">/x</parameter>')
+        )
+        self.assertFalse(
+            _should_keep("output with hookSpecificOutput payload inside it")
+        )
+        self.assertTrue(
+            _should_keep("a remembered decision about the staging environment")
+        )
 
 
-class WriteBottleneckTest(unittest.TestCase):
-    """Verbalizable-bottleneck behavior: writes are distilled and near-dups
-    supersede instead of piling up."""
+class WriteNormalizationTest(unittest.TestCase):
+    """Coverage for fact normalization and near-duplicate supersession."""
 
     def make_store(self) -> SharedMemoryStore:
         return SharedMemoryStore(home=Path(tempfile.mkdtemp()))
 
     def test_remember_preamble_stripped_on_write(self) -> None:
         store = self.make_store()
-        store.add("Remember that the dev build script is build-dev-app.sh.")
+        store.add("Remember that the staging command is run-staging.sh.")
         fact = store.list(limit=1)[0]
-        self.assertTrue(fact.content.startswith("the dev build script"))
+        self.assertTrue(fact.content.startswith("the staging command"))
 
     def test_keyless_near_duplicate_supersedes(self) -> None:
         store = self.make_store()
-        first = store.add("Review workflow uses four workers and one reviewer for boards.")
+        first = store.add("Review workflow uses two checks before package publication.")
         second = store.add(
-            "Review workflow uses four workers and one reviewer for boards, retry twice."
+            "Review workflow uses two checks before package publication, with one retry."
         )
 
         current = store.list(limit=10)
@@ -42,7 +47,7 @@ class WriteBottleneckTest(unittest.TestCase):
     def test_different_facts_do_not_supersede(self) -> None:
         store = self.make_store()
         store.add("Analytics data lives in Parquet under data/warehouse.")
-        store.add("Dashboard panels route through PanelInteractionSurface.")
+        store.add("Dashboard controls route through the native event bridge.")
         self.assertEqual(len(store.list(limit=10)), 2)
 
     def test_maybe_vacuum_runs_only_when_free_pages(self) -> None:

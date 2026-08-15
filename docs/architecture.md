@@ -2,10 +2,10 @@
 
 ## Purpose
 
-Mneme is a local memory service for trusted agents. Any
-configured MCP-compatible client can use the same durable context. Applications
-and individual projects can keep separate, app-owned memory stores when their
-data should not enter the machine-wide context.
+Mneme is a local memory service for trusted agents. Any configured
+MCP-compatible client can use the same durable context. Applications and
+individual projects can use isolated memory homes when their data should not
+enter shared context.
 
 The default memory home is:
 
@@ -13,14 +13,11 @@ The default memory home is:
 - generated working sets: `~/.hermes/memories/USER.md` and
   `~/.hermes/memories/MEMORY.md`
 
-No application process, bundle identifier, or application data directory is a
-dependency of global Mneme.
-
 ## System boundary
 
 ```text
 Agent 1 ─┐
-Agent 2 ─┼── MCP / CLI / hooks ── Global Mneme ── ~/.hermes
+Agent 2 ─┼── MCP / CLI / hooks ── Shared Mneme ── ~/.hermes
 Agent 3 ─┘
 
 Local app ────── app-owned memory engine ── application data/<app id>
@@ -30,7 +27,7 @@ Each agent connects directly to Mneme. No separate agent runtime is required.
 
 ## Memory model
 
-Global Mneme stores:
+Mneme stores:
 
 - semantic facts;
 - procedural strategies and runbooks;
@@ -74,7 +71,8 @@ unavailable.
 `USER.md` and `MEMORY.md` are generated views, not the source of truth.
 
 - Working sets contain trusted, curated facts only.
-- Automated capture remains search-only until promoted.
+- Automated capture remains available only through explicit candidate review
+  or candidate-inclusive search until promoted.
 - Transcript capture stores complete-line byte offsets in SQLite, so repeat hooks
   process appended JSONL records instead of rescanning entire sessions.
 - Prompt hooks inject a small working set plus relevance-gated facts.
@@ -95,10 +93,10 @@ unavailable.
 
 ## MCP contract
 
-The global MCP server exposes:
+The MCP server exposes:
 
 - summary, briefing, search, list, and current-value resolution;
-- remember, update, feedback, review, and lifecycle controls;
+- write, update, feedback, review, and lifecycle controls;
 - handoff read/write;
 - health, maintenance, consolidation, and embedding backfill;
 - optional local agent delegation.

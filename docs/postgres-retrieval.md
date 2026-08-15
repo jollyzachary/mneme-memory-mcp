@@ -30,8 +30,6 @@ The image is built from pinned multi-architecture release digests:
 - `ghcr.io/evokoa/pgcontext:pg17-v0.2.0`
 - `ghcr.io/evokoa/pggraph:1.0.0`
 
-The wrapper does not include a command that deletes the Docker volume.
-
 ## Install and stage
 
 For a managed global install, include the PostgreSQL retrieval client:
@@ -67,8 +65,8 @@ Apply the copy after reviewing the counts:
 python scripts/migrate_sqlite_to_postgres.py --apply --skip-graph-rebuild
 ```
 
-The Docker service applies pgGraph's trigger-backed sync buffer every minute as
-the internal database administrator. The MCP application role never receives
+The Docker service applies pgGraph's trigger-backed sync buffer every minute
+through the database administrator role. The MCP application role never receives
 graph-administrator privileges.
 
 After a bulk migration, compact the accumulated graph mutations once from the

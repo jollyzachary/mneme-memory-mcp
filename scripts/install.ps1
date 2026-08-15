@@ -26,13 +26,13 @@ Mneme Memory MCP Windows installer
 Usage:
   powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 [-Profile global|project|server] [options]
 
-This installs Mneme into a managed user-data directory, not the Desktop or repo
-checkout. You must choose a setup profile so Mneme never silently assumes
-machine-wide memory. Client configuration is best-effort.
+Mneme installs into a managed user-data directory. Choose a setup profile to
+set the memory scope and client configuration. Client configuration is
+best-effort.
 
 Setup profiles:
-  global   Machine-wide persistent memory in ~/.hermes, with global Claude/Codex
-           instructions, Claude startup injection, and local conversation capture.
+  global   Shared persistent memory in ~/.hermes, with supported client
+           configuration, startup context, and local conversation capture.
   project  Project/env-scoped memory from .env, defaulting to a project folder
            under %LOCALAPPDATA%\mneme-memory-mcp\projects. This configures MCP
            clients without installing global memory instructions.
@@ -101,7 +101,7 @@ function Select-SetupProfile {
 No Mneme setup profile was selected.
 
 Pass one of these profiles explicitly:
-  global   machine-wide memory and global Claude/Codex instructions
+  global   shared memory with supported client continuity
   project  project/env-scoped memory from .env
   server   server install only; manual wiring
 
@@ -117,16 +117,14 @@ Example:
     Write-Host "Choose a Mneme setup profile:"
     Write-Host ""
     Write-Host "  1) Global persistent memory"
-    Write-Host "     Best for a personal machine. Claude and Codex always start from the"
-    Write-Host "     same memory layer, including fresh chats."
+    Write-Host "     Shared memory and continuity hooks for supported clients."
     Write-Host ""
     Write-Host "  2) Project/env-scoped memory"
-    Write-Host "     Best for sharing the repo or isolating work. Memory comes from .env."
-    Write-Host "     No global Claude/Codex instructions are added."
+    Write-Host "     An isolated memory home for this workspace, configured through .env."
     Write-Host ""
     Write-Host "  3) Server only / manual wiring"
-    Write-Host "     Installs Mneme locally and prints config. No client, plugin, or global"
-    Write-Host "     memory changes."
+    Write-Host "     Installs Mneme locally and prints config without client configuration"
+    Write-Host "     or continuity hooks."
     Write-Host ""
 
     $choice = Read-Host "Select 1, 2, or 3"
@@ -370,11 +368,11 @@ function Configure-Clients {
 
 function Install-Continuity {
   if ($NoContinuity) {
-    Write-Host "==> Skipping always-on memory continuity installation."
+    Write-Host "==> Skipping client continuity installation."
     return
   }
 
-  Invoke-Optional "Installing always-on Mneme memory continuity for Codex and Claude" {
+  Invoke-Optional "Installing Mneme client continuity for Codex and Claude" {
     & $script:VenvPython -m mneme_memory_mcp.continuity install --memory-home $script:HermesHome --bin-dir $script:ScriptsDir
   }
 }
