@@ -2,15 +2,18 @@
 
 ![Mneme agent bridge](../assets/docs/agent-bridge.png)
 
-Mneme's primary job is shared memory. Claude Code, Codex, Hermes, and other
-trusted MCP clients can read and write the same local store without routing
-through one another.
+Mneme's primary job is shared memory. Trusted MCP-compatible agents can read
+and write the same local store without routing through one another.
 
 ```text
-Claude Code ─┐
-Codex ───────┼── mneme-memory-mcp ── local memory home
-Hermes ──────┘
+Agent 1 ─┐
+Agent 2 ─┼── mneme-memory-mcp ── local memory home
+Agent 3 ─┘
 ```
+
+The agents may use different clients or models, or they may be separate
+instances of the same client. Mneme gives each one direct access to the same
+governed memory layer.
 
 ## Shared memory
 

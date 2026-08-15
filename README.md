@@ -8,6 +8,9 @@ Local-first memory infrastructure for AI agents.
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-111111.svg)](LICENSE)
 
+Mneme is pronounced NEE-mee. Its name comes from the Greek word μνήμη
+(*mnḗmē*), meaning “memory” or “remembrance.”
+
 Mneme gives trusted local AI clients a shared, durable memory layer through the
 [Model Context Protocol](https://modelcontextprotocol.io/). It preserves useful
 context across sessions without making a cloud service the source of truth.
@@ -26,7 +29,8 @@ Agent context is usually trapped inside one chat, one client, or one vendor.
 Mneme separates durable memory from the agent using it:
 
 - one local source of truth for facts, preferences, decisions, and handoffs;
-- shared recall across Claude Code, Codex, Hermes, and other MCP clients;
+- durable recall for one agent, or shared recall across multiple trusted
+  MCP-compatible agents;
 - explicit trust states for manual, automated, quarantined, and rejected memory;
 - human-readable generated views without treating Markdown as the database;
 - lexical, semantic, and relationship-aware retrieval with a local fallback;
@@ -35,15 +39,19 @@ Mneme separates durable memory from the agent using it:
 ## Architecture
 
 ```text
-Claude Code ─┐
-Codex ───────┼── MCP / CLI / local hooks ── Mneme
-Hermes ──────┘                              │
-                                             ├── SQLite journal (authoritative)
-                                             ├── USER.md / MEMORY.md (generated)
-                                             └── PostgreSQL retrieval plane (optional)
-                                                  ├── pgContext vectors
-                                                  └── pgGraph relationships
+Agent 1 ─┐
+Agent 2 ─┼── MCP / CLI / local hooks ── Mneme
+Agent 3 ─┘                              │
+                                         ├── SQLite journal (authoritative)
+                                         ├── USER.md / MEMORY.md (generated)
+                                         └── PostgreSQL retrieval plane (optional)
+                                              ├── pgContext vectors
+                                              └── pgGraph relationships
 ```
+
+A single agent can use Mneme for continuity across sessions. Multiple agents
+can use different clients or models, or separate instances of the same client.
+Each connects to Mneme directly; no agent has to coordinate the others.
 
 SQLite remains authoritative for facts, lifecycle state, review decisions,
 supersession, audit events, handoffs, and episodic archives. PostgreSQL is a
@@ -64,6 +72,9 @@ service is unavailable.
   while resolving the current value deterministically.
 - **Compact context:** generated `USER.md` and `MEMORY.md` views contain trusted
   global/project material only; private and handoff-only scopes stay out.
+- **Cross-agent handoffs:** structured goals, state, decisions, blockers,
+  evidence, and next steps let one agent or session hand work to another
+  without passing the full chat history.
 - **Optional capture:** local Claude and Codex transcripts can be archived as
   bounded episodic data and distilled into reviewable candidates.
 - **Portable access:** MCP tools and local CLI commands use the same store.

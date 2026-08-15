@@ -2,10 +2,10 @@
 
 ## Purpose
 
-Global Mneme is the machine-wide memory service for trusted local agents such
-as Claude Code, Codex, and Hermes. Applications and individual projects can
-keep separate, app-owned memory stores when their data should not enter the
-machine-wide context.
+Global Mneme is the machine-wide memory service for trusted local agents. Any
+configured MCP-compatible client can use the same durable context. Applications
+and individual projects can keep separate, app-owned memory stores when their
+data should not enter the machine-wide context.
 
 Global Mneme continues to use the Hermes-compatible home:
 
@@ -19,15 +19,15 @@ dependency of global Mneme.
 ## System boundary
 
 ```text
-Claude Code ─┐
-Codex ───────┼── MCP / CLI / hooks ── Global Mneme ── ~/.hermes
-Hermes ──────┘
+Agent 1 ─┐
+Agent 2 ─┼── MCP / CLI / hooks ── Global Mneme ── ~/.hermes
+Agent 3 ─┘
 
 Local app ────── app-owned memory engine ── application data/<app id>
 ```
 
-Hermes is an agent runtime. Mneme is the shared memory service. They may use
-the same `~/.hermes` home, but they remain separate components.
+Each agent connects directly to Mneme. The default home remains compatible
+with Hermes, but Mneme does not require Hermes Agent.
 
 ## Memory model
 
@@ -104,8 +104,8 @@ The global MCP server exposes:
 - health, maintenance, consolidation, and embedding backfill;
 - optional local agent delegation.
 
-Claude, Codex, and Hermes connect to the same server command and memory home.
-The compatibility `hermes_memory` MCP may remain during migration, but
+Configured agents connect to the same server command and memory home. The
+compatibility `hermes_memory` MCP may remain during migration, but
 `mneme_memory` is the canonical global service after verification.
 
 ## Migration invariants
