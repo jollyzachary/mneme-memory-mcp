@@ -8,6 +8,7 @@ import os
 import re
 import sqlite3
 import struct
+import threading
 import time
 from collections.abc import Callable, Sequence
 from contextlib import closing
@@ -56,6 +57,8 @@ _embed_model = None
 _embed_model_failed = False
 _embed_fn_override: Callable[[list[str]], list[list[float]]] | None = None
 _LOGGER = logging.getLogger(__name__)
+_SCHEMA_VERSION = 11
+_SCHEMA_LOCK = threading.RLock()
 
 
 def connect_db(db_path: Path | str) -> sqlite3.Connection:
@@ -214,18 +217,31 @@ class SharedMemoryStore:
         self.db_path = db_path or resolve_db_path(self.home)
         self.user_file = self.memory_dir / "USER.md"
         self.memory_file = self.memory_dir / "MEMORY.md"
+        self._schema_ready = False
 
     def ensure(self) -> None:
-        self.memory_dir.mkdir(parents=True, exist_ok=True)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        _harden_private_path(self.home, directory=True)
-        _harden_private_path(self.memory_dir, directory=True)
-        _harden_private_path(self.db_path.parent, directory=True)
-        with closing(self.connect()) as conn:
-            conn.executescript(SCHEMA)
-            _migrate(conn)
-            conn.commit()
-        _harden_private_path(self.db_path)
+        if self._schema_ready and self.db_path.exists():
+            return
+        with _SCHEMA_LOCK:
+            if self._schema_ready and self.db_path.exists():
+                return
+            self.memory_dir.mkdir(parents=True, exist_ok=True)
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            _harden_private_path(self.home, directory=True)
+            _harden_private_path(self.memory_dir, directory=True)
+            _harden_private_path(self.db_path.parent, directory=True)
+            with closing(self.connect()) as conn:
+                current_version = int(
+                    conn.execute("PRAGMA user_version").fetchone()[0]
+                )
+                if current_version < _SCHEMA_VERSION:
+                    conn.executescript(SCHEMA)
+                    conn.commit()
+                    conn.execute("BEGIN IMMEDIATE")
+                    _migrate(conn)
+                    conn.commit()
+            _harden_private_path(self.db_path)
+            self._schema_ready = True
 
     def connect(self) -> sqlite3.Connection:
         return connect_db(self.db_path)
@@ -2061,24 +2077,28 @@ CREATE TABLE IF NOT EXISTS capture_checkpoints (
 """
 
 
-TRIGGERS = """
-CREATE TRIGGER IF NOT EXISTS facts_ai AFTER INSERT ON facts BEGIN
-    INSERT INTO facts_fts(rowid, content, tags)
-        VALUES (new.fact_id, new.content, new.tags);
-END;
-
-CREATE TRIGGER IF NOT EXISTS facts_ad AFTER DELETE ON facts BEGIN
-    INSERT INTO facts_fts(facts_fts, rowid, content, tags)
-        VALUES ('delete', old.fact_id, old.content, old.tags);
-END;
-
-CREATE TRIGGER IF NOT EXISTS facts_au AFTER UPDATE ON facts BEGIN
-    INSERT INTO facts_fts(facts_fts, rowid, content, tags)
-        VALUES ('delete', old.fact_id, old.content, old.tags);
-    INSERT INTO facts_fts(rowid, content, tags)
-        VALUES (new.fact_id, new.content, new.tags);
-END;
-"""
+TRIGGER_STATEMENTS = (
+    """
+    CREATE TRIGGER IF NOT EXISTS facts_ai AFTER INSERT ON facts BEGIN
+        INSERT INTO facts_fts(rowid, content, tags)
+            VALUES (new.fact_id, new.content, new.tags);
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS facts_ad AFTER DELETE ON facts BEGIN
+        INSERT INTO facts_fts(facts_fts, rowid, content, tags)
+            VALUES ('delete', old.fact_id, old.content, old.tags);
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS facts_au AFTER UPDATE ON facts BEGIN
+        INSERT INTO facts_fts(facts_fts, rowid, content, tags)
+            VALUES ('delete', old.fact_id, old.content, old.tags);
+        INSERT INTO facts_fts(rowid, content, tags)
+            VALUES (new.fact_id, new.content, new.tags);
+    END
+    """,
+)
 
 
 def format_facts(facts: list[Fact]) -> str:
@@ -2089,13 +2109,10 @@ def format_facts(facts: list[Fact]) -> str:
 
 def _migrate(conn: sqlite3.Connection) -> None:
     prior_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
-    conn.executescript(
-        """
-        DROP TRIGGER IF EXISTS facts_ai;
-        DROP TRIGGER IF EXISTS facts_ad;
-        DROP TRIGGER IF EXISTS facts_au;
-        """
-    )
+    if prior_version >= _SCHEMA_VERSION:
+        return
+    for trigger_name in ("facts_ai", "facts_ad", "facts_au"):
+        conn.execute(f"DROP TRIGGER IF EXISTS {trigger_name}")
     columns = {
         row["name"] for row in conn.execute("PRAGMA table_info(facts)").fetchall()
     }
@@ -2165,9 +2182,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     )
     if prior_version < 9:
         _quarantine_unsafe_existing(conn)
-    conn.execute("PRAGMA user_version = 11")
+    conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
     _rebuild_fts(conn)
-    conn.executescript(TRIGGERS)
+    for statement in TRIGGER_STATEMENTS:
+        conn.execute(statement)
 
 
 def _row_to_fact(row: sqlite3.Row) -> Fact:
