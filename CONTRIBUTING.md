@@ -23,19 +23,20 @@ python -m build
 - Add or update tests for storage, migration, scope, or installer changes.
 - Preserve SQLite migration compatibility and idempotence.
 - Keep the PostgreSQL plane rebuildable from SQLite.
-- Preserve the explicit setup-profile confirmation rule in `AGENTS.md`.
-- Document new environment variables and reject unrelated project `.env` keys.
+- Preserve explicit setup-profile selection in the guided installers.
+- Document new configuration variables and keep project configuration
+  allowlisted.
 - Call out changes that expand filesystem, subprocess, network, or client-config
   authority.
 
 ## Fixture hygiene
 
-Use synthetic examples only. Do not copy real memory, transcripts, credentials,
-usernames, hostnames, repository secrets, product codenames, or local filesystem
-paths into source, tests, screenshots, or issue reports.
+Use synthetic fixtures and examples. Do not include credentials, personal
+memory, transcripts, identifiable machine paths, or private host information in
+source, tests, screenshots, or issue reports.
 
-Local memory stores, `.env` files, generated working sets, agent briefs, logs,
-caches, PostgreSQL secrets, and scratch output must remain untracked.
+Local stores, generated working sets, configuration containing credentials,
+logs, caches, database secrets, and scratch output must remain untracked.
 
 ## Security reports
 

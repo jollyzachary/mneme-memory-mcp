@@ -8,4 +8,4 @@ startup_timeout_sec = 120
 
 [mcp_servers.mneme_memory.env]
 # Optional. Defaults to %USERPROFILE%\.hermes.
-HERMES_HOME = 'C:\Users\YOU\.hermes'
+MNEME_HOME = 'C:\absolute\path\to\mneme-home'

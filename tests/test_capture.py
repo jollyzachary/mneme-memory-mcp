@@ -115,6 +115,33 @@ class CaptureTest(unittest.TestCase):
         self.assertNotIn("abcdefghijklmnop123456", snippets[0].text)
         self.assertIn("[redacted]", snippets[0].text)
 
+    def test_parse_codex_redacts_private_keys_and_jwts(self) -> None:
+        private_key = (
+            "-----BEGIN PRIVATE KEY-----\n"
+            "c3ludGhldGljLWtleS1tYXRlcmlhbA==\n"
+            "-----END PRIVATE KEY-----"
+        )
+        jwt = "eyJhbGciOiJIUzI1NiJ9.c3ludGhldGljLXBheWxvYWQ.c3ludGhldGljLXNpZ25hdHVyZQ"
+        path = self.write_jsonl(
+            [
+                {"type": "session_meta", "payload": {"id": "codex-sensitive"}},
+                {
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "user_message",
+                        "message": f"Credentials: {private_key} token={jwt}",
+                    },
+                },
+            ]
+        )
+
+        snippets = parse_codex_jsonl(path)
+
+        self.assertEqual(len(snippets), 1)
+        self.assertNotIn("BEGIN PRIVATE KEY", snippets[0].text)
+        self.assertNotIn("eyJhbGci", snippets[0].text)
+        self.assertIn("[redacted]", snippets[0].text)
+
     def test_capture_routes_raw_turns_to_episodic_and_distills_searchable_summary(
         self,
     ) -> None:
@@ -142,7 +169,10 @@ class CaptureTest(unittest.TestCase):
         self.assertEqual(stats.snippets_indexed, 1)
         # Raw transcript must not live in facts; distilled/summary may surface via FTS
         # or hybrid paraphrase search. Never return the un-distilled "Please remember" form.
-        framed = store.search("Please remember the deploy command")
+        self.assertEqual(store.search("deploy command"), [])
+        framed = store.search(
+            "Please remember the deploy command", include_candidates=True
+        )
         for hit in framed:
             self.assertNotIn("Please remember the deploy command is", hit.content)
             self.assertTrue(
@@ -150,7 +180,10 @@ class CaptureTest(unittest.TestCase):
                 or "session summary" in hit.content.lower()
                 or "deploy command" in hit.content.lower()
             )
-        self.assertIn("deploy command", store.search("deploy command")[0].content)
+        self.assertIn(
+            "deploy command",
+            store.search("deploy command", include_candidates=True)[0].content,
+        )
         with store.connect() as conn:
             episodic_count = conn.execute(
                 "SELECT COUNT(*) FROM episodic_entries"

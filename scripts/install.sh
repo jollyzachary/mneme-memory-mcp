@@ -12,12 +12,10 @@ MEMORY_HOME="$GLOBAL_MEMORY_HOME"
 ENV_FILE="${MNEME_ENV_FILE:-$ROOT/.env}"
 PROJECT_MEMORY_HOME="${MNEME_PROJECT_HOME:-$MNEME_DATA_DIR/projects/$PROJECT_SLUG}"
 SETUP_PROFILE="${MNEME_SETUP_PROFILE:-}"
-PROFILE_CONFIRMED="${MNEME_PROFILE_CONFIRMED:-0}"
 MCP_COMMAND="$VENV_DIR/bin/mneme-memory-mcp"
 MCP_ARGS=()
 MCP_STATIC_ENV=1
 CONFIGURE_CLIENTS=1
-INSTALL_AGENT_PLUGINS=0
 INSTALL_CONTINUITY=1
 EDITABLE_INSTALL="${MNEME_EDITABLE:-0}"
 INSTALL_EMBEDDINGS="${MNEME_INSTALL_EMBEDDINGS:-1}"
@@ -29,12 +27,11 @@ usage() {
 Mneme Memory MCP installer
 
 Usage:
-  ./scripts/install.sh [--profile global|project|server] [--profile-confirmed] [options]
+  ./scripts/install.sh [--profile global|project|server] [options]
 
 This installs Mneme into a managed user-data directory, not the Desktop or
 repo checkout. You must choose a setup profile so Mneme never silently assumes
-machine-wide memory. Client configuration is best-effort. Hermes Agent and
-third-party agent plugins are installed only when explicitly requested.
+machine-wide memory. Client configuration is best-effort.
 
 Setup profiles:
   global   Machine-wide persistent memory in ~/.hermes, with global Claude/Codex
@@ -46,7 +43,6 @@ Setup profiles:
 
 Options:
   --profile VALUE      Select global, project, or server setup.
-  --profile-confirmed  Confirm the selected profile after the user has chosen it.
   --global-memory      Alias for --profile global.
   --project-memory     Alias for --profile project.
   --server-only        Alias for --profile server.
@@ -57,15 +53,13 @@ Options:
   --no-embeddings      Skip the local semantic-retrieval dependencies.
   --postgres-retrieval Install the PostgreSQL retrieval client dependency.
   --no-client-config   Do not modify Codex or Claude MCP configuration.
-  --agent-plugins      Explicitly install the optional agent plugins.
   --no-continuity      Do not install global Claude/Codex memory instructions.
-  --memory-only        Skip client config, agent plugins, and continuity changes.
+  --memory-only        Skip client configuration and continuity changes.
 
 Environment:
   MNEME_HOME    Memory home to use. Defaults to HERMES_HOME or ~/.hermes.
   HERMES_HOME   Hermes-compatible memory home.
   MNEME_SETUP_PROFILE  global, project, or server.
-  MNEME_PROFILE_CONFIRMED  Set to 1 only after the user chose the setup profile.
   MNEME_INSTALL_DIR    Managed install directory.
   MNEME_VENV_DIR       Python virtualenv directory.
   MNEME_DATA_DIR       Mneme data directory. Defaults to ~/.local/share/mneme-memory-mcp.
@@ -112,9 +106,6 @@ while [ "$#" -gt 0 ]; do
       ;;
     --profile=*)
       SETUP_PROFILE="${1#*=}"
-      ;;
-    --profile-confirmed)
-      PROFILE_CONFIRMED=1
       ;;
     --global-memory)
       SETUP_PROFILE="global"
@@ -169,24 +160,14 @@ while [ "$#" -gt 0 ]; do
     --postgres-retrieval)
       INSTALL_POSTGRES=1
       ;;
-    --no-hermes|--no-hermes-install)
-      # Backwards-compatible no-op. Mneme never installs Hermes.
-      ;;
     --no-client-config)
       CONFIGURE_CLIENTS=0
-      ;;
-    --no-agent-plugins)
-      INSTALL_AGENT_PLUGINS=0
-      ;;
-    --agent-plugins)
-      INSTALL_AGENT_PLUGINS=1
       ;;
     --no-continuity)
       INSTALL_CONTINUITY=0
       ;;
     --memory-only)
       CONFIGURE_CLIENTS=0
-      INSTALL_AGENT_PLUGINS=0
       INSTALL_CONTINUITY=0
       ;;
     -h|--help)
@@ -201,22 +182,6 @@ while [ "$#" -gt 0 ]; do
   esac
   shift
 done
-
-find_hermes() {
-  if command -v hermes >/dev/null 2>&1; then
-    command -v hermes
-    return 0
-  fi
-
-  for candidate in "$HOME/.local/bin/hermes" "$HOME/.hermes/bin/hermes" "$HOME/.hermes/hermes-agent/hermes"; do
-    if [ -x "$candidate" ]; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-  done
-
-  return 1
-}
 
 run_optional() {
   local label="$1"
@@ -282,15 +247,12 @@ EOF
     case "$choice" in
       1|global|g)
         SETUP_PROFILE="global"
-        PROFILE_CONFIRMED=1
         ;;
       2|project|p|env)
         SETUP_PROFILE="project"
-        PROFILE_CONFIRMED=1
         ;;
       3|server|s|manual)
         SETUP_PROFILE="server"
-        PROFILE_CONFIRMED=1
         ;;
       *)
         echo "Unknown selection: $choice" >&2
@@ -301,16 +263,13 @@ EOF
     cat >&2 <<'EOF'
 No Mneme setup profile was selected.
 
-Mneme must ask the user to choose one of these setup profiles before it can
-change local memory or client configuration:
+Pass one of these profiles explicitly:
   global   machine-wide memory and global Claude/Codex instructions
   project  project/env-scoped memory from .env
   server   server install only; manual wiring
 
-Agents and other non-interactive callers must stop here, ask the user which
-profile they want, then rerun with both the chosen profile and explicit
-confirmation, for example:
-  ./scripts/install.sh --profile project --profile-confirmed
+Example:
+  ./scripts/install.sh --profile project
 EOF
     exit 2
   fi
@@ -325,42 +284,6 @@ EOF
       ;;
   esac
 
-  case "$PROFILE_CONFIRMED" in
-    1|true|TRUE|True|yes|YES|Yes)
-      return 0
-      ;;
-  esac
-
-  if [ -t 0 ] && [ "${MNEME_INSTALL_NONINTERACTIVE:-0}" != "1" ]; then
-    cat <<EOF
-
-Selected Mneme setup profile: $SETUP_PROFILE
-
-This choice controls whether Mneme writes global Claude/Codex memory
-instructions, uses project-scoped memory, or only installs the local server.
-EOF
-    printf 'Type "%s" to confirm this profile, or anything else to stop: ' "$SETUP_PROFILE"
-    read -r confirmation
-    if [ "$confirmation" = "$SETUP_PROFILE" ] || [ "$confirmation" = "yes" ]; then
-      PROFILE_CONFIRMED=1
-      return 0
-    fi
-    echo "Profile was not confirmed; stopping before install." >&2
-    exit 2
-  fi
-
-  cat >&2 <<EOF
-Mneme setup profile "$SETUP_PROFILE" was supplied, but the user confirmation
-step has not been recorded.
-
-Agents and other non-interactive callers must stop, ask the user to choose
-global, project, or server setup, then rerun only after the user answers:
-  ./scripts/install.sh --profile $SETUP_PROFILE --profile-confirmed
-
-You can also set MNEME_PROFILE_CONFIRMED=1 after the user has explicitly
-confirmed the selected setup profile.
-EOF
-  exit 2
 }
 
 read_env_memory_home() {
@@ -440,7 +363,6 @@ apply_profile() {
     server)
       MEMORY_HOME="$GLOBAL_MEMORY_HOME"
       CONFIGURE_CLIENTS=0
-      INSTALL_AGENT_PLUGINS=0
       INSTALL_CONTINUITY=0
       MCP_COMMAND="$VENV_DIR/bin/mneme-memory-mcp"
       MCP_ARGS=()
@@ -453,6 +375,7 @@ apply_profile() {
       ;;
   esac
 
+  export MNEME_HOME="$MEMORY_HOME"
   export HERMES_HOME="$MEMORY_HOME"
 }
 
@@ -489,7 +412,7 @@ configure_clients() {
     if [ "$MCP_STATIC_ENV" -eq 1 ]; then
       run_optional_mcp_command \
         "Configuring Codex MCP server: mneme_memory" \
-        codex mcp add --env "HERMES_HOME=$HERMES_HOME" mneme_memory --
+        codex mcp add --env "MNEME_HOME=$MNEME_HOME" mneme_memory --
     else
       run_optional_mcp_command \
         "Configuring Codex MCP server: mneme_memory" \
@@ -504,7 +427,7 @@ configure_clients() {
     if [ "$MCP_STATIC_ENV" -eq 1 ]; then
       run_optional_mcp_command \
         "Configuring Claude Code MCP server: mneme-memory" \
-        claude mcp add -s user mneme-memory -e "HERMES_HOME=$HERMES_HOME" --
+        claude mcp add -s user mneme-memory -e "MNEME_HOME=$MNEME_HOME" --
     else
       run_optional_mcp_command \
         "Configuring Claude Code MCP server: mneme-memory" \
@@ -512,41 +435,6 @@ configure_clients() {
     fi
   else
     echo "==> Claude CLI not found; skipping Claude MCP configuration."
-  fi
-}
-
-install_agent_plugins() {
-  if [ "$INSTALL_AGENT_PLUGINS" -ne 1 ]; then
-    echo "==> Skipping agent plugin installation."
-    return 0
-  fi
-
-  if command -v claude >/dev/null 2>&1; then
-    run_optional \
-      "Adding Claude Code marketplace: openai/codex-plugin-cc" \
-      claude plugin marketplace add openai/codex-plugin-cc
-    run_optional \
-      "Installing Claude Code plugin: codex@openai-codex" \
-      claude plugin install -s user codex@openai-codex
-    run_optional \
-      "Adding Claude Code marketplace: DietrichGebert/ponytail" \
-      claude plugin marketplace add DietrichGebert/ponytail
-    run_optional \
-      "Installing Claude Code plugin: ponytail@ponytail" \
-      claude plugin install -s user ponytail@ponytail
-  else
-    echo "==> Claude CLI not found; skipping Claude plugin installation."
-  fi
-
-  if command -v codex >/dev/null 2>&1; then
-    run_optional \
-      "Adding Codex marketplace: DietrichGebert/ponytail" \
-      codex plugin marketplace add DietrichGebert/ponytail
-    run_optional \
-      "Installing Codex plugin: ponytail@ponytail" \
-      codex plugin add ponytail@ponytail
-  else
-    echo "==> Codex CLI not found; skipping Codex plugin installation."
   fi
 }
 
@@ -558,13 +446,13 @@ install_continuity() {
 
   run_optional \
     "Installing always-on Mneme memory continuity for Codex and Claude" \
-    "$VENV_DIR/bin/mneme-memory-continuity" install --memory-home "$HERMES_HOME" --bin-dir "$VENV_DIR/bin"
+    "$VENV_DIR/bin/mneme-memory-continuity" install --memory-home "$MNEME_HOME" --bin-dir "$VENV_DIR/bin"
 }
 
 print_manual_config() {
   cat <<EOF
 
-==> Mneme agent mesh
+==> Mneme configuration
 
 Selected profile: $SETUP_PROFILE
 
@@ -595,13 +483,6 @@ EOF
 EOF
   fi
 
-  if [ "$INSTALL_AGENT_PLUGINS" -eq 1 ]; then
-    cat <<'EOF'
-- OpenAI codex-plugin-cc in Claude Code for Claude -> Codex delegation
-- Ponytail in Codex and Claude Code for smaller, safer code generation
-EOF
-  fi
-
   cat <<'EOF'
 
 If automatic client configuration was skipped or failed, add Mneme manually.
@@ -618,7 +499,7 @@ args = []
 startup_timeout_sec = 120
 
 [mcp_servers.mneme_memory.env]
-HERMES_HOME = "$HERMES_HOME"
+MNEME_HOME = "$MNEME_HOME"
 
 Claude Code:
 
@@ -629,7 +510,7 @@ Claude Code:
       "command": "$MCP_COMMAND",
       "args": [],
       "env": {
-        "HERMES_HOME": "$HERMES_HOME"
+        "MNEME_HOME": "$MNEME_HOME"
       }
     }
   }
@@ -689,12 +570,6 @@ echo "python: $PYTHON_BIN"
 echo "semantic embeddings: $([ "$INSTALL_EMBEDDINGS" = "1" ] && echo enabled || echo disabled)"
 echo "PostgreSQL retrieval client: $([ "$INSTALL_POSTGRES" = "1" ] && echo enabled || echo disabled)"
 
-if ! HERMES_BIN="$(find_hermes)"; then
-  echo "==> Hermes Agent not found. Continuing; Mneme does not install external agent software."
-else
-  echo "==> Hermes Agent found: $HERMES_BIN"
-fi
-
 mkdir -p "$INSTALL_DIR"
 "$PYTHON_BIN" -m venv --clear "$VENV_DIR"
 "$VENV_DIR/bin/python" -m pip install --upgrade pip
@@ -719,13 +594,13 @@ fi
 mkdir -p "$MEMORY_HOME/memories"
 [ -f "$MEMORY_HOME/memories/USER.md" ] || printf '# USER.md\n\n' > "$MEMORY_HOME/memories/USER.md"
 [ -f "$MEMORY_HOME/memories/MEMORY.md" ] || printf '# MEMORY.md\n\n' > "$MEMORY_HOME/memories/MEMORY.md"
+chmod 700 "$MEMORY_HOME" "$MEMORY_HOME/memories"
+chmod 600 "$MEMORY_HOME/memories/USER.md" "$MEMORY_HOME/memories/MEMORY.md"
 
 echo
 install_continuity
 echo
 configure_clients
-echo
-install_agent_plugins
 echo
 "$VENV_DIR/bin/mneme-memory-doctor"
 

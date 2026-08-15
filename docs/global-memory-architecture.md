@@ -1,13 +1,13 @@
-# Global Mneme Memory Architecture
+# Mneme architecture
 
 ## Purpose
 
-Global Mneme is the machine-wide memory service for trusted local agents. Any
+Mneme is a local memory service for trusted agents. Any
 configured MCP-compatible client can use the same durable context. Applications
 and individual projects can keep separate, app-owned memory stores when their
 data should not enter the machine-wide context.
 
-Global Mneme continues to use the Hermes-compatible home:
+The default memory home is:
 
 - database: `~/.hermes/memory_store.db`
 - generated working sets: `~/.hermes/memories/USER.md` and
@@ -26,8 +26,7 @@ Agent 3 ─┘
 Local app ────── app-owned memory engine ── application data/<app id>
 ```
 
-Each agent connects directly to Mneme. The default home remains compatible
-with Hermes, but Mneme does not require Hermes Agent.
+Each agent connects directly to Mneme. No separate agent runtime is required.
 
 ## Memory model
 
@@ -104,9 +103,7 @@ The global MCP server exposes:
 - health, maintenance, consolidation, and embedding backfill;
 - optional local agent delegation.
 
-Configured agents connect to the same server command and memory home. The
-compatibility `hermes_memory` MCP may remain during migration, but
-`mneme_memory` is the canonical global service after verification.
+Configured agents connect to the same server command and memory home.
 
 ## Migration invariants
 

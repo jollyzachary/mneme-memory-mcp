@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Backfill local fact embeddings for hybrid retrieval.
 
-SAFETY: Never point --db at the live Hermes store without an explicit copy.
+SAFETY: Never point --db at the live Mneme store without an explicit copy.
 The live path is typically ~/.hermes/memory_store.db (or $MNEME_DB_PATH /
-$HERMES_HOME/memory_store.db). This script refuses that path unless
---allow-live is passed.
+$MNEME_HOME/memory_store.db). This script refuses that path unless --allow-live
+is passed.
 
 Examples
 --------
@@ -85,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
     live_paths = _live_db_candidates()
     if db_path in live_paths and not args.allow_live:
         print(
-            "REFUSED: refusing to write the live Mneme/Hermes memory database.\n"
+            "REFUSED: refusing to write the live Mneme memory database.\n"
             f"  target: {db_path}\n"
             "  Copy it first, e.g.:\n"
             f"    cp {db_path} /tmp/mneme-embed-scratch.db\n"

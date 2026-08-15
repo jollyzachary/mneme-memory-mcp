@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -83,12 +84,21 @@ class ContinuityTest(unittest.TestCase):
             prompt_hook_executable = os.access(paths.claude_prompt_hook, os.X_OK)
             capture_hook_executable = os.access(paths.claude_capture_hook, os.X_OK)
             notify_executable = os.access(paths.codex_notify_wrapper, os.X_OK)
+            memory_dir_mode = stat.S_IMODE(
+                (paths.memory_home / "memories").stat().st_mode
+            )
+            user_memory_mode = stat.S_IMODE(
+                (paths.memory_home / "memories" / "USER.md").stat().st_mode
+            )
 
         self.assertTrue(first.codex_instructions)
         self.assertTrue(second.claude_sessionstart_hook)
         self.assertTrue(second.claude_userprompt_hook)
         self.assertTrue(second.claude_stop_capture_hook)
         self.assertTrue(second.claude_sessionend_capture_hook)
+        if os.name != "nt":
+            self.assertEqual(memory_dir_mode, 0o700)
+            self.assertEqual(user_memory_mode, 0o600)
         self.assertTrue(second.claude_mcp_config)
         self.assertTrue(second.codex_notify_capture)
         self.assertIn("# Existing Codex Notes", codex_text)
@@ -133,7 +143,7 @@ class ContinuityTest(unittest.TestCase):
                                     "hooks": [
                                         {
                                             "type": "command",
-                                            "command": "/Users/me/.claude/hooks/hermes-memory.sh",
+                                            "command": "/absolute/path/.claude/hooks/hermes-memory.sh",
                                         }
                                     ]
                                 }

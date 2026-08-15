@@ -5,7 +5,7 @@
       "command": "C:\\absolute\\path\\to\\mneme-memory-mcp\\.venv\\Scripts\\python.exe",
       "args": ["-m", "mneme_memory_mcp"],
       "env": {
-        "HERMES_HOME": "C:\\Users\\YOU\\.hermes"
+        "MNEME_HOME": "C:\\absolute\\path\\to\\mneme-home"
       }
     }
   }

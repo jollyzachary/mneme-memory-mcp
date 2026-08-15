@@ -1,9 +1,7 @@
-# Agent Mesh
+# Shared memory and optional delegation
 
-![Mneme agent bridge](../assets/docs/agent-bridge.png)
-
-Mneme's primary job is shared memory. Trusted MCP-compatible agents can read
-and write the same local store without routing through one another.
+Mneme's primary job is shared memory. Trusted MCP-compatible agents read and
+write the same local store directly.
 
 ```text
 Agent 1 ─┐
@@ -17,8 +15,8 @@ governed memory layer.
 
 ## Shared memory
 
-All connected clients use the same MCP server command and `MNEME_HOME` or
-`HERMES_HOME`. The default global home contains:
+Connected clients use the same MCP server command and `MNEME_HOME`. The default
+global home contains:
 
 ```text
 ~/.hermes/memory_store.db
@@ -31,9 +29,9 @@ sets for compact continuity.
 
 ## Optional local delegation
 
-Mneme includes an optional bridge for one-shot Claude Code and Codex tasks. It
-is deliberately absent from the default MCP tool surface because a local
-subprocess executor has a larger trust boundary than a memory service.
+Mneme includes an optional bridge for bounded, one-shot local agent tasks. It is
+absent from the default MCP surface because subprocess execution has a larger
+trust boundary than memory access.
 
 Enable it only for a trusted workspace:
 
@@ -51,17 +49,10 @@ When enabled, the server registers:
 | `delegate_to_claude` | Run a bounded Claude Code task inside the bridge root |
 | `delegate_to_codex` | Run a bounded Codex task inside the bridge root |
 
-Working directories must remain inside `MNEME_BRIDGE_ROOT`. Codex is limited to
-`read-only` or `workspace-write`; the MCP tool does not expose
-`danger-full-access`. Claude uses its default permission mode. Child processes
-receive a minimal environment, diagnostic command arguments are redacted, and
+Working directories must remain inside `MNEME_BRIDGE_ROOT`. The public bridge
+does not expose unrestricted Codex execution modes. Child processes receive an
+allowlisted environment, diagnostic command arguments are redacted, and
 returned output is bounded.
-
-## External integrations
-
-OpenAI's Claude-to-Codex plugin and Ponytail are optional upstream projects.
-Mneme does not vendor them. The guided installer will attempt to add them only
-when the user supplies the explicit agent-plugin flag.
 
 ## Safety boundary
 

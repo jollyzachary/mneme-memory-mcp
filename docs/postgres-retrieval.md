@@ -37,7 +37,7 @@ The wrapper does not include a command that deletes the Docker volume.
 For a managed global install, include the PostgreSQL retrieval client:
 
 ```bash
-./scripts/install.sh --profile global --profile-confirmed --postgres-retrieval
+./scripts/install.sh --profile global --postgres-retrieval
 ```
 
 For development installs, install both local retrieval extras:
@@ -84,17 +84,18 @@ explicit relationships. It does not modify or delete the SQLite file.
 
 ## Cutover modes
 
-Set these variables in the environment used to launch the Mneme MCP server:
+Set these variables in the process environment used to launch the Mneme MCP
+server:
 
-```env
-MNEME_RETRIEVAL_BACKEND=postgres
-MNEME_POSTGRES_HOST=127.0.0.1
-MNEME_POSTGRES_PORT=55433
-MNEME_POSTGRES_DATABASE=mneme
-MNEME_POSTGRES_USER=mneme_app
-MNEME_POSTGRES_PASSWORD_FILE=~/.local/share/mneme-memory-mcp/postgres/secrets/app_password
-MNEME_POSTGRES_REQUIRED=0
-MNEME_GRAPH_SYNC_ON_WRITE=0
+```bash
+export MNEME_RETRIEVAL_BACKEND=postgres
+export MNEME_POSTGRES_HOST=127.0.0.1
+export MNEME_POSTGRES_PORT=55433
+export MNEME_POSTGRES_DATABASE=mneme
+export MNEME_POSTGRES_USER=mneme_app
+export MNEME_POSTGRES_PASSWORD_FILE=~/.local/share/mneme-memory-mcp/postgres/secrets/app_password
+export MNEME_POSTGRES_REQUIRED=0
+export MNEME_GRAPH_SYNC_ON_WRITE=0
 ```
 
 The available modes are:

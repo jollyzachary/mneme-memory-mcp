@@ -23,8 +23,9 @@ Include:
 - expected and observed behavior;
 - potential confidentiality, integrity, or availability impact.
 
-Never include real credentials, memory contents, transcripts, local database
-files, or private filesystem paths. Use synthetic data in reproductions.
+Use synthetic data in reproductions. Remove credentials, memory content,
+transcripts, local database files, and identifying machine paths before sharing
+diagnostics.
 
 ## Deployment boundary
 
@@ -37,13 +38,8 @@ The optional conversation-capture and local agent-bridge features expand the
 data and execution boundary. The bridge is disabled by default and should be
 enabled only with an explicit contained workspace root.
 
-## Sensitive local files
+## Sensitive local data
 
-The following must never be committed or attached to an issue:
-
-- `.env` files;
-- `memory_store.db`, WAL, or backup files;
-- generated `USER.md` or `MEMORY.md` files containing real memory;
-- PostgreSQL password files or volumes;
-- Claude, Codex, or Hermes transcripts;
-- logs, crash dumps, or command output containing local context.
+Do not commit or attach local memory databases, generated working sets,
+credentials, database secrets, conversation archives, logs, crash dumps, or
+diagnostics containing private context.

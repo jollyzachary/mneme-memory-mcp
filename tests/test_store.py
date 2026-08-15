@@ -76,8 +76,14 @@ class SharedMemoryStoreTest(unittest.TestCase):
         )
         store.consolidate_session(source="codex", session_id="session-1")
 
-        self.assertEqual(store.search("archived turns")[0].memory_type, "resource")
-        self.assertIn("test command", store.search("test command")[0].content)
+        self.assertEqual(
+            store.search("archived turns", include_candidates=True)[0].memory_type,
+            "resource",
+        )
+        self.assertIn(
+            "test command",
+            store.search("test command", include_candidates=True)[0].content,
+        )
 
     def test_supersession_resolves_current_key(self) -> None:
         store = self.make_store()
@@ -309,10 +315,15 @@ class SharedMemoryStoreTest(unittest.TestCase):
             source="manual",
             trust_score=0.50,
         )
-        hits = store.search("widget parser", scope="global")
+        hits = store.search(
+            "widget parser", scope="global", include_candidates=True
+        )
         self.assertEqual(hits[0].fact_id, manual_id)
         self.assertEqual(hits[0].source, "manual")
-        # capture is demoted, not dropped — still reachable in the result set.
+        self.assertFalse(
+            any(h.source == "capture" for h in store.search("widget parser"))
+        )
+        # Candidate capture is available only through an explicit request.
         self.assertTrue(any(h.source == "capture" for h in hits))
 
     def test_prune_events_bounds_fact_add(self) -> None:

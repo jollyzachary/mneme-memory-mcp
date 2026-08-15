@@ -9,7 +9,7 @@ from mneme_memory_mcp.store import SharedMemoryStore
 
 
 class GovernanceTest(unittest.TestCase):
-    """Frontier-audit regressions: security write-gate (§G) + temporal / experience-reuse (§H)."""
+    """Regression coverage for memory governance and temporal correctness."""
 
     def make(self) -> tuple[SharedMemoryStore, Path]:
         root = Path(tempfile.mkdtemp())
@@ -22,7 +22,7 @@ class GovernanceTest(unittest.TestCase):
                 (f"%{needle}%",),
             ).fetchall()
 
-    # --- §G Security -----------------------------------------------------------------
+    # Security
 
     def test_injection_write_is_quarantined(self) -> None:
         """A poisoning payload is stored for audit but forced agent-private + trust-floored
@@ -74,7 +74,7 @@ class GovernanceTest(unittest.TestCase):
         self.assertEqual(rows[0][0], "global")
         self.assertNotIn("quarantined", rows[0][1])
 
-    # --- §H Temporal correctness -----------------------------------------------------
+    # Temporal correctness
 
     def test_supersession_current_only(self) -> None:
         """A newer keyed write supersedes the older; current() and default search return
@@ -91,7 +91,7 @@ class GovernanceTest(unittest.TestCase):
         self.assertTrue(any("make release" in c for c in contents))
         self.assertFalse(any("swift build" in c for c in contents), "superseded v1 must not surface")
 
-    # --- §H Experience reuse ---------------------------------------------------------
+    # Experience reuse
 
     def test_experience_reuse_retrieval(self) -> None:
         """A stored strategy (procedural memory) is retrievable by a later related query —

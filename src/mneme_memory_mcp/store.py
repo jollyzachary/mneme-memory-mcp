@@ -656,6 +656,8 @@ class SharedMemoryStore:
         limit: int = 25,
         include_superseded: bool = False,
         scope: MemoryScope = "project",
+        *,
+        include_candidates: bool = False,
     ) -> list[Fact]:
         self.ensure()
         limit = _bounded_limit(limit, upper=100)
@@ -663,7 +665,11 @@ class SharedMemoryStore:
         params: list[object] = []
         if not include_superseded:
             clauses.append("superseded_by IS NULL")
-        clauses.append("state IN ('trusted', 'candidate')")
+        clauses.append(
+            "state IN ('trusted', 'candidate')"
+            if include_candidates
+            else "state = 'trusted'"
+        )
         clauses.append(f"scope IN ({','.join('?' for _ in _visible_scopes(scope))})")
         params.extend(_visible_scopes(scope))
         where = f"WHERE {' AND '.join(clauses)}"
@@ -687,6 +693,7 @@ class SharedMemoryStore:
         scope: MemoryScope = "project",
         *,
         record: bool = True,
+        include_candidates: bool = False,
     ) -> list[Fact]:
         self.ensure()
         query = query.strip()
@@ -708,6 +715,7 @@ class SharedMemoryStore:
                     fact
                     for fact in _facts_by_ids(conn, list(postgres_scores.keys()))
                     if fact.scope in scopes
+                    and (include_candidates or fact.state == "trusted")
                 ]
                 results = _rank_search_facts(facts, postgres_scores)[:limit]
                 if record and results:
@@ -731,6 +739,7 @@ class SharedMemoryStore:
                 fact
                 for fact in _facts_by_ids(conn, list(rrf_scores.keys()))
                 if fact.scope in scopes
+                and (include_candidates or fact.state == "trusted")
             ]
             results = _rank_search_facts(facts, rrf_scores)[:limit]
             if record and results:
@@ -767,19 +776,30 @@ class SharedMemoryStore:
             )
             return {}, False
 
-    def current(self, key: str, scope: MemoryScope = "project") -> Fact | None:
+    def current(
+        self,
+        key: str,
+        scope: MemoryScope = "project",
+        *,
+        include_candidates: bool = False,
+    ) -> Fact | None:
         self.ensure()
         normalized = _normalize_key(key)
         if not normalized:
             return None
         scopes = _visible_scopes(scope)
+        state_clause = (
+            "state IN ('trusted', 'candidate')"
+            if include_candidates
+            else "state = 'trusted'"
+        )
         with closing(self.connect()) as conn:
             rows = conn.execute(
                 f"""
                 SELECT {_fact_select_sql()}
                 FROM facts
                 WHERE key = ? AND superseded_by IS NULL
-                  AND state IN ('trusted', 'candidate')
+                  AND {state_clause}
                   AND scope IN ({",".join("?" for _ in scopes)})
                 """,
                 (normalized, *scopes),
@@ -1799,8 +1819,8 @@ class SharedMemoryStore:
                 # Keyless near-duplicates used to pile up and only got hidden at
                 # view time; supersede them at write time instead so the newest
                 # restatement is the single current fact.
-                # ponytail: first-8-significant-words marker (same as the view
-                # dedupe); upgrade to similarity scoring if false merges show up.
+                # Use the same significant-word marker as generated-view
+                # deduplication, then confirm with bounded similarity scoring.
                 marker = _content_marker(content)
                 candidates = conn.execute(
                     """
@@ -3205,8 +3225,7 @@ def _short_hash(text: str) -> str:
 
 
 def _strip_preamble(text: str) -> str:
-    """Verbalizable-bottleneck cleanup: drop 'remember that...' style framing so the
-    stored fact is the fact itself."""
+    """Remove request framing so the stored value is the fact itself."""
     text = re.sub(r"(?i)^(please\s+)?remember\s+(that\s+)?", "", text)
     return re.sub(r"(?i)^(note\s+that|important:)\s*", "", text)
 
@@ -3219,7 +3238,3 @@ def _truncate(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 16)].rstrip() + " ... [truncated]"
-
-
-# TODO(mneme): add optional embedding and temporal/entity graph indexes beside FTS5.
-# Keep FTS as the default exact-symbol path; merge/dedupe semantic/graph hits here.

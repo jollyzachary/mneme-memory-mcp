@@ -120,7 +120,10 @@ def install_continuity(paths: ContinuityPaths | None = None) -> ContinuityStatus
     paths = paths or default_paths()
     _validate_generated_paths(paths)
     memory_dir = resolve_memory_dir(paths.memory_home)
-    memory_dir.mkdir(parents=True, exist_ok=True)
+    memory_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if os.name != "nt":
+        paths.memory_home.chmod(0o700)
+        memory_dir.chmod(0o700)
     _ensure_memory_file(memory_dir / "USER.md", "USER.md")
     _ensure_memory_file(memory_dir / "MEMORY.md", "MEMORY.md")
 
@@ -653,6 +656,8 @@ def _iter_hook_commands(entry: Any) -> list[str]:
 def _ensure_memory_file(path: Path, title: str) -> None:
     if not path.exists():
         path.write_text(f"# {title}\n\n", encoding="utf-8")
+    if os.name != "nt":
+        path.chmod(0o600)
 
 
 def _path_contains(path: Path, text: str) -> bool:
