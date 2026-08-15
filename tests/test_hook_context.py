@@ -15,7 +15,7 @@ class HookContextTest(unittest.TestCase):
     def test_prompt_keywords_drop_stopwords_and_dupes(self) -> None:
         words = prompt_keywords("Please check the DuckDB catalog data venv, DuckDB again")
         self.assertIn("duckdb", words)
-        self.assertIn("market", words)
+        self.assertIn("catalog", words)
         self.assertNotIn("please", words)
         self.assertEqual(words.count("duckdb"), 1)
 
