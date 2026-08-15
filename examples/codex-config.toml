@@ -1,0 +1,10 @@
+# Add this to ~/.codex/config.toml, adjusting the command path to your install.
+
+[mcp_servers.mneme_memory]
+command = "/absolute/path/to/mneme-memory-mcp/.venv/bin/mneme-memory-mcp"
+args = []
+startup_timeout_sec = 120
+
+[mcp_servers.mneme_memory.env]
+# Optional. Defaults to ~/.hermes.
+HERMES_HOME = "/Users/YOU/.hermes"

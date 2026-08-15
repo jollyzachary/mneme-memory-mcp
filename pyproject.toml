@@ -1,0 +1,61 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mneme-memory-mcp"
+version = "0.10.1"
+description = "A local MCP memory and agent-mesh bridge for Claude, Codex, Hermes, and other agents."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "Zachary Jolly" }
+]
+keywords = ["mcp", "memory", "claude", "codex", "hermes", "agents"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Database",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+  "mcp>=1.29,<2"
+]
+
+[project.urls]
+Homepage = "https://github.com/jollyzachary/mneme-memory-mcp"
+Repository = "https://github.com/jollyzachary/mneme-memory-mcp"
+Issues = "https://github.com/jollyzachary/mneme-memory-mcp/issues"
+
+[project.optional-dependencies]
+dev = [
+  "build>=1.2",
+  "pytest>=8"
+]
+# Local hybrid retrieval (C1). Without these, search() stays FTS5+LIKE only.
+embeddings = [
+  "sentence-transformers>=5.0,<6",
+  "numpy>=1.24,<3"
+]
+# Local pgContext + pgGraph retrieval plane. The PostgreSQL extensions remain
+# self-hosted; this is only the local Python wire protocol.
+postgres = [
+  "psycopg[binary]>=3.2,<4"
+]
+
+[project.scripts]
+mneme-memory = "mneme_memory_mcp.cli:main"
+mneme-memory-capture = "mneme_memory_mcp.capture:main"
+mneme-memory-continuity = "mneme_memory_mcp.continuity:main"
+mneme-memory-env-mcp = "mneme_memory_mcp.env_launcher:main"
+mneme-memory-mcp = "mneme_memory_mcp.server:main"
+mneme-memory-doctor = "mneme_memory_mcp.doctor:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mneme_memory_mcp"]

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "mneme-memory": {
+      "type": "stdio",
+      "command": "C:\\absolute\\path\\to\\mneme-memory-mcp\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "mneme_memory_mcp"],
+      "env": {
+        "HERMES_HOME": "C:\\Users\\YOU\\.hermes"
+      }
+    }
+  }
+}

@@ -1,0 +1,24 @@
+name: Bug report
+description: Report broken Mneme Memory MCP behavior.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Include the expected behavior and the actual behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. Install...\n2. Run...\n3. See..."
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: OS, Python version, client, and sanitized diagnostics. Remove credentials, memory content, usernames, and private paths.

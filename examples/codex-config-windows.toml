@@ -1,0 +1,11 @@
+# Add this to %USERPROFILE%\.codex\config.toml, adjusting the command path to your install.
+# TOML literal strings keep Windows backslashes from being treated as escapes.
+
+[mcp_servers.mneme_memory]
+command = 'C:\absolute\path\to\mneme-memory-mcp\.venv\Scripts\python.exe'
+args = ['-m', 'mneme_memory_mcp']
+startup_timeout_sec = 120
+
+[mcp_servers.mneme_memory.env]
+# Optional. Defaults to %USERPROFILE%\.hermes.
+HERMES_HOME = 'C:\Users\YOU\.hermes'

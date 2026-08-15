@@ -1,0 +1,42 @@
+name: mneme-memory
+
+services:
+  postgres:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mneme-postgres:17-pgcontext0.2-pggraph1.0
+    container_name: mneme-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mneme
+      POSTGRES_USER: mneme_admin
+      POSTGRES_PASSWORD_FILE: /run/secrets/admin_password
+      MNEME_APP_USER: mneme_app
+      MNEME_APP_PASSWORD_FILE: /run/secrets/app_password
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "127.0.0.1:${MNEME_POSTGRES_PORT:-55433}:5432"
+    secrets:
+      - admin_password
+      - app_password
+    volumes:
+      - mneme_postgres_data:/var/lib/postgresql/data
+    shm_size: 256mb
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mneme_admin -d mneme"]
+      interval: 5s
+      timeout: 3s
+      start_period: 15s
+      retries: 24
+
+secrets:
+  admin_password:
+    file: ${MNEME_POSTGRES_SECRET_DIR:-${HOME}/.local/share/mneme-memory-mcp/postgres/secrets}/admin_password
+  app_password:
+    file: ${MNEME_POSTGRES_SECRET_DIR:-${HOME}/.local/share/mneme-memory-mcp/postgres/secrets}/app_password
+
+volumes:
+  mneme_postgres_data:
+    name: mneme_postgres_data
