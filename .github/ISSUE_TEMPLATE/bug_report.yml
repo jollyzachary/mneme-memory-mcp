@@ -21,4 +21,4 @@ body:
     id: context
     attributes:
       label: Context
-      description: OS, Python version, client, and sanitized diagnostics. Remove credentials, memory content, usernames, and private paths.
+      description: OS, Python version, client, and sanitized diagnostics. Remove credentials, memory content, and identifying machine details.

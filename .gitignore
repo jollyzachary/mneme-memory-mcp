@@ -18,8 +18,10 @@ memory_store.db*
 *.sqlite3
 *.sqlite-wal
 *.sqlite-shm
+*.db
 *.db-wal
 *.db-shm
+*.log
 backups/
 tmp/
 work/
@@ -27,7 +29,6 @@ MEMORY-BEST-PRACTICES.txt
 *.agent.log
 .env
 .env.*
-!.env.example
 .envrc
 .mneme/
 .hermes/

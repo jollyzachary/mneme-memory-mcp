@@ -2,7 +2,6 @@ param(
   [Alias("Profile")]
   [ValidateSet("global", "project", "server")]
   [string]$SetupProfile = $env:MNEME_SETUP_PROFILE,
-  [switch]$ProfileConfirmed,
   [switch]$GlobalMemory,
   [switch]$ProjectMemory,
   [switch]$ServerOnly,
@@ -11,10 +10,7 @@ param(
   [string]$VenvDir = $env:MNEME_VENV_DIR,
   [switch]$Editable,
   [switch]$NoEmbeddings,
-  [switch]$NoHermesInstall,
   [switch]$NoClientConfig,
-  [switch]$NoAgentPlugins,
-  [switch]$AgentPlugins,
   [switch]$NoContinuity,
   [switch]$MemoryOnly,
   [string]$PythonBin = $env:PYTHON_BIN,
@@ -28,16 +24,15 @@ function Show-Usage {
 Mneme Memory MCP Windows installer
 
 Usage:
-  powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 [-Profile global|project|server] [-ProfileConfirmed] [options]
+  powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 [-Profile global|project|server] [options]
 
-This installs Mneme into a managed user-data directory, not the Desktop or repo
-checkout. You must choose a setup profile so Mneme never silently assumes
-machine-wide memory. Client configuration is best-effort. Optional agent
-plugins are installed only when explicitly requested.
+Mneme installs into a managed user-data directory. Choose a setup profile to
+set the memory scope and client configuration. Client configuration is
+best-effort.
 
 Setup profiles:
-  global   Machine-wide persistent memory in ~/.hermes, with global Claude/Codex
-           instructions, Claude startup injection, and local conversation capture.
+  global   Shared persistent memory in ~/.hermes, with supported client
+           configuration, startup context, and local conversation capture.
   project  Project/env-scoped memory from .env, defaulting to a project folder
            under %LOCALAPPDATA%\mneme-memory-mcp\projects. This configures MCP
            clients without installing global memory instructions.
@@ -45,7 +40,6 @@ Setup profiles:
 
 Options:
   -Profile VALUE      Select global, project, or server setup.
-  -ProfileConfirmed   Confirm the selected profile after the user has chosen it.
   -GlobalMemory       Alias for -Profile global.
   -ProjectMemory      Alias for -Profile project.
   -ServerOnly         Alias for -Profile server.
@@ -54,17 +48,14 @@ Options:
   -VenvDir PATH       Python virtualenv directory. Default: <InstallDir>\venv.
   -Editable           Install Mneme in editable mode for local development.
   -NoEmbeddings       Skip the local semantic-retrieval dependencies.
-  -NoHermesInstall    Skip Hermes Agent lookup messaging.
   -NoClientConfig     Do not modify Codex or Claude MCP configuration.
-  -AgentPlugins       Explicitly install the optional agent plugins.
   -NoContinuity       Do not install global Claude/Codex memory instructions.
-  -MemoryOnly         Same as -NoClientConfig -NoAgentPlugins -NoContinuity.
+  -MemoryOnly         Same as -NoClientConfig -NoContinuity.
 
 Environment:
   MNEME_HOME          Memory home to use. Defaults to HERMES_HOME or ~/.hermes.
   HERMES_HOME         Hermes-compatible memory home.
   MNEME_SETUP_PROFILE global, project, or server.
-  MNEME_PROFILE_CONFIRMED  Set to 1 only after the user chose the setup profile.
   MNEME_INSTALL_DIR   Managed install directory.
   MNEME_VENV_DIR      Python virtualenv directory.
   MNEME_DATA_DIR      Mneme data directory. Defaults to %LOCALAPPDATA%\mneme-memory-mcp.
@@ -104,23 +95,18 @@ $GlobalMemoryHome = if ($env:MNEME_HOME) {
 if ($GlobalMemory) { $SetupProfile = "global" }
 if ($ProjectMemory) { $SetupProfile = "project" }
 if ($ServerOnly) { $SetupProfile = "server" }
-$script:ProfileConfirmed = [bool]$ProfileConfirmed -or ($env:MNEME_PROFILE_CONFIRMED -match "^(1|true|yes)$")
-
 function Select-SetupProfile {
   if (-not $script:SetupProfile -and ($env:MNEME_INSTALL_NONINTERACTIVE -eq "1" -or [Console]::IsInputRedirected)) {
     $message = @"
 No Mneme setup profile was selected.
 
-Mneme must ask the user to choose one of these setup profiles before it can
-change local memory or client configuration:
-  global   machine-wide memory and global Claude/Codex instructions
+Pass one of these profiles explicitly:
+  global   shared memory with supported client continuity
   project  project/env-scoped memory from .env
   server   server install only; manual wiring
 
-Agents and other non-interactive callers must stop here, ask the user which
-profile they want, then rerun with both the chosen profile and explicit
-confirmation, for example:
-  powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Profile project -ProfileConfirmed
+Example:
+  powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Profile project
 "@
     [Console]::Error.WriteLine($message)
     exit 2
@@ -131,68 +117,30 @@ confirmation, for example:
     Write-Host "Choose a Mneme setup profile:"
     Write-Host ""
     Write-Host "  1) Global persistent memory"
-    Write-Host "     Best for a personal machine. Claude and Codex always start from the"
-    Write-Host "     same memory layer, including fresh chats."
+    Write-Host "     Shared memory and continuity hooks for supported clients."
     Write-Host ""
     Write-Host "  2) Project/env-scoped memory"
-    Write-Host "     Best for sharing the repo or isolating work. Memory comes from .env."
-    Write-Host "     No global Claude/Codex instructions are added."
+    Write-Host "     An isolated memory home for this workspace, configured through .env."
     Write-Host ""
     Write-Host "  3) Server only / manual wiring"
-    Write-Host "     Installs Mneme locally and prints config. No client, plugin, or global"
-    Write-Host "     memory changes."
+    Write-Host "     Installs Mneme locally and prints config without client configuration"
+    Write-Host "     or continuity hooks."
     Write-Host ""
 
     $choice = Read-Host "Select 1, 2, or 3"
     switch ($choice) {
-      { $_ -in @("1", "global", "g") } { $script:SetupProfile = "global"; $script:ProfileConfirmed = $true }
-      { $_ -in @("2", "project", "p", "env") } { $script:SetupProfile = "project"; $script:ProfileConfirmed = $true }
-      { $_ -in @("3", "server", "s", "manual") } { $script:SetupProfile = "server"; $script:ProfileConfirmed = $true }
+      { $_ -in @("1", "global", "g") } { $script:SetupProfile = "global" }
+      { $_ -in @("2", "project", "p", "env") } { $script:SetupProfile = "project" }
+      { $_ -in @("3", "server", "s", "manual") } { $script:SetupProfile = "server" }
       default { throw "Unknown setup profile selection: $choice" }
     }
   }
-
-  if ($script:ProfileConfirmed) {
-    return
-  }
-
-  if ($env:MNEME_INSTALL_NONINTERACTIVE -eq "1" -or [Console]::IsInputRedirected) {
-    $message = @"
-Mneme setup profile "$script:SetupProfile" was supplied, but the user
-confirmation step has not been recorded.
-
-Agents and other non-interactive callers must stop, ask the user to choose
-global, project, or server setup, then rerun only after the user answers:
-  powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Profile $script:SetupProfile -ProfileConfirmed
-
-You can also set MNEME_PROFILE_CONFIRMED=1 after the user has explicitly
-confirmed the selected setup profile.
-"@
-    [Console]::Error.WriteLine($message)
-    exit 2
-  }
-
-  Write-Host ""
-  Write-Host "Selected Mneme setup profile: $script:SetupProfile"
-  Write-Host ""
-  Write-Host "This choice controls whether Mneme writes global Claude/Codex memory"
-  Write-Host "instructions, uses project-scoped memory, or only installs the local server."
-  Write-Host ""
-  $confirmation = Read-Host "Type `"$script:SetupProfile`" to confirm this profile, or anything else to stop"
-  if ($confirmation -eq $script:SetupProfile -or $confirmation -eq "yes") {
-    $script:ProfileConfirmed = $true
-    return
-  }
-
-  [Console]::Error.WriteLine("Profile was not confirmed; stopping before install.")
-  exit 2
 }
 
 Select-SetupProfile
 
 if ($MemoryOnly) {
   $NoClientConfig = $true
-  $NoAgentPlugins = $true
   $NoContinuity = $true
 }
 
@@ -274,26 +222,6 @@ function Invoke-Python {
   )
 
   & $Python.Command @($Python.Args + $PythonArgs)
-}
-
-function Find-Hermes {
-  $command = Get-Command hermes -ErrorAction SilentlyContinue
-  if ($command) {
-    return $command.Source
-  }
-
-  $candidates = @(
-    (Join-Path $HOME ".local\bin\hermes.exe"),
-    (Join-Path $HOME ".hermes\bin\hermes.exe"),
-    (Join-Path $HOME ".hermes\hermes-agent\hermes.exe"),
-    (Join-Path $LocalData "hermes\hermes-agent\venv\Scripts\hermes.exe")
-  )
-  foreach ($candidate in $candidates) {
-    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
-      return $candidate
-    }
-  }
-  return $null
 }
 
 function Invoke-Optional {
@@ -407,7 +335,7 @@ function Configure-Clients {
     }
     $args = @("mcp", "add")
     if ($script:McpStaticEnv) {
-      $args += @("--env", "HERMES_HOME=$script:HermesHome")
+      $args += @("--env", "MNEME_HOME=$script:HermesHome")
     }
     $args += @("mneme_memory", "--", $script:McpCommand)
     $args += $script:McpArgs
@@ -426,7 +354,7 @@ function Configure-Clients {
     }
     $args = @("mcp", "add", "-s", "user", "mneme-memory")
     if ($script:McpStaticEnv) {
-      $args += @("-e", "HERMES_HOME=$script:HermesHome")
+      $args += @("-e", "MNEME_HOME=$script:HermesHome")
     }
     $args += @("--", $script:McpCommand)
     $args += $script:McpArgs
@@ -438,42 +366,13 @@ function Configure-Clients {
   }
 }
 
-function Install-AgentPlugins {
-  if ($NoAgentPlugins) {
-    Write-Host "==> Skipping agent plugin installation."
-    return
-  }
-
-  $claude = Get-Command claude -ErrorAction SilentlyContinue
-  if ($claude -and (Test-CommandRunnable "claude")) {
-    Invoke-Optional "Adding Claude Code marketplace: openai/codex-plugin-cc" { & claude plugin marketplace add openai/codex-plugin-cc }
-    Invoke-Optional "Installing Claude Code plugin: codex@openai-codex" { & claude plugin install -s user codex@openai-codex }
-    Invoke-Optional "Adding Claude Code marketplace: DietrichGebert/ponytail" { & claude plugin marketplace add DietrichGebert/ponytail }
-    Invoke-Optional "Installing Claude Code plugin: ponytail@ponytail" { & claude plugin install -s user ponytail@ponytail }
-  } elseif ($claude) {
-    Write-Host "==> Claude CLI was found but could not run; skipping Claude plugin installation."
-  } else {
-    Write-Host "==> Claude CLI not found; skipping Claude plugin installation."
-  }
-
-  $codex = Get-Command codex -ErrorAction SilentlyContinue
-  if ($codex -and (Test-CommandRunnable "codex")) {
-    Invoke-Optional "Adding Codex marketplace: DietrichGebert/ponytail" { & codex plugin marketplace add DietrichGebert/ponytail }
-    Invoke-Optional "Installing Codex plugin: ponytail@ponytail" { & codex plugin add ponytail@ponytail }
-  } elseif ($codex) {
-    Write-Host "==> Codex CLI was found but could not run; skipping Codex plugin installation."
-  } else {
-    Write-Host "==> Codex CLI not found; skipping Codex plugin installation."
-  }
-}
-
 function Install-Continuity {
   if ($NoContinuity) {
-    Write-Host "==> Skipping always-on memory continuity installation."
+    Write-Host "==> Skipping client continuity installation."
     return
   }
 
-  Invoke-Optional "Installing always-on Mneme memory continuity for Codex and Claude" {
+  Invoke-Optional "Installing Mneme client continuity for Codex and Claude" {
     & $script:VenvPython -m mneme_memory_mcp.continuity install --memory-home $script:HermesHome --bin-dir $script:ScriptsDir
   }
 }
@@ -503,7 +402,7 @@ function ConvertTo-TomlArray {
 
 function Print-ManualConfig {
   Write-Host ""
-  Write-Host "==> Mneme agent mesh"
+  Write-Host "==> Mneme configuration"
   Write-Host ""
   Write-Host "Selected profile: $SetupProfile"
   Write-Host ""
@@ -525,7 +424,7 @@ args = $argsToml
 startup_timeout_sec = 120
 
 [mcp_servers.mneme_memory.env]
-HERMES_HOME = $homeToml
+MNEME_HOME = $homeToml
 
 Claude Code:
 
@@ -536,7 +435,7 @@ Claude Code:
       "command": $commandJson,
       "args": $argsJson,
       "env": {
-        "HERMES_HOME": $homeJson
+        "MNEME_HOME": $homeJson
       }
     }
   }
@@ -594,14 +493,9 @@ switch ($SetupProfile) {
   "server" {
     $HermesHome = Resolve-MnemePath -PathValue $GlobalMemoryHome
     $NoClientConfig = $true
-    $NoAgentPlugins = $true
     $NoContinuity = $true
     $McpStaticEnv = $true
   }
-}
-
-if (-not $AgentPlugins) {
-  $NoAgentPlugins = $true
 }
 
 $installRoot = [IO.Path]::GetFullPath($InstallDir).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
@@ -627,6 +521,7 @@ if ($McpStaticEnv) {
   $McpArgs = @("-m", "mneme_memory_mcp.env_launcher", "--env-file", $EnvFile, "--default-home", $ProjectMemoryHome)
 }
 
+$env:MNEME_HOME = $HermesHome
 $env:HERMES_HOME = $HermesHome
 
 Write-Host "profile: $SetupProfile"
@@ -638,15 +533,6 @@ if ($SetupProfile -eq "project") {
 }
 Write-Host "python: $($Python.Display)"
 Write-Host "semantic embeddings: $(if ($NoEmbeddings) { 'disabled' } else { 'enabled' })"
-
-if (-not $NoHermesInstall) {
-  $hermes = Find-Hermes
-  if ($hermes) {
-    Write-Host "==> Hermes Agent found: $hermes"
-  } else {
-    Write-Host "==> Hermes Agent not found. Native Hermes auto-install is not available on Windows; continuing with Mneme MCP memory."
-  }
-}
 
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 Invoke-Python -Python $Python -PythonArgs @("-m", "venv", "--clear", $VenvDir)
@@ -678,8 +564,6 @@ Write-Host ""
 Install-Continuity
 Write-Host ""
 Configure-Clients
-Write-Host ""
-Install-AgentPlugins
 Write-Host ""
 & $VenvPython -m mneme_memory_mcp.doctor
 

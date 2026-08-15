@@ -20,7 +20,7 @@ def store() -> SharedMemoryStore:
 
 @mcp.tool()
 def memory_summary() -> str:
-    """Return the always-on shared memory summary."""
+    """Return the generated trusted-memory summary."""
 
     return store().summary()
 
@@ -30,10 +30,18 @@ def memory_search(
     query: str,
     limit: int = 10,
     scope: Literal["global", "project", "agent-private", "handoff"] = "project",
+    include_candidates: bool = False,
 ) -> str:
-    """Search the shared memory fact store."""
+    """Search memory. Unreviewed candidates are excluded unless requested."""
 
-    return format_facts(store().search(query=query, limit=limit, scope=scope))
+    return format_facts(
+        store().search(
+            query=query,
+            limit=limit,
+            scope=scope,
+            include_candidates=include_candidates,
+        )
+    )
 
 
 @mcp.tool()
@@ -58,10 +66,17 @@ def memory_health() -> str:
 def memory_list(
     limit: int = 25,
     scope: Literal["global", "project", "agent-private", "handoff"] = "project",
+    include_candidates: bool = False,
 ) -> str:
-    """List recent facts from the shared memory fact store."""
+    """List recent memory. Unreviewed candidates are excluded by default."""
 
-    return format_facts(store().list(limit=limit, scope=scope))
+    return format_facts(
+        store().list(
+            limit=limit,
+            scope=scope,
+            include_candidates=include_candidates,
+        )
+    )
 
 
 @mcp.tool()

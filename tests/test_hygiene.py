@@ -12,9 +12,9 @@ class HygieneTest(unittest.TestCase):
         return SharedMemoryStore(home=Path(tempfile.mkdtemp()))
 
     def test_tool_call_markup_is_stripped(self) -> None:
-        # Bug #1: a leaked tool-call boundary must never be stored.
-        dirty = 'Always rebuild the dev app.</content> <parameter name="category">project'
-        self.assertEqual(_normalize_content(dirty), "Always rebuild the dev app.")
+        # A leaked tool-call boundary must never be stored.
+        dirty = 'Release notes are required.</content> <parameter name="category">project'
+        self.assertEqual(_normalize_content(dirty), "Release notes are required.")
 
         store = self.make_store()
         fid = store.add(dirty, target="memory", category="project", key="rebuild")
@@ -24,8 +24,7 @@ class HygieneTest(unittest.TestCase):
         self.assertNotIn("parameter name", stored.content)
 
     def test_user_facts_survive_a_flood_of_recent_facts(self) -> None:
-        # Bug #3: an older user_pref fact must still reach USER.md even when many
-        # newer non-user facts exist (the old filter-after-limit dropped it).
+        # User preferences remain in USER.md regardless of newer project facts.
         store = self.make_store()
         store.add(
             "The operator prefers concise technical summaries.",
@@ -41,7 +40,7 @@ class HygieneTest(unittest.TestCase):
         self.assertNotIn("No current facts", user_md)
 
     def test_capture_facts_excluded_from_working_set(self) -> None:
-        # Bug #2: capture stays searchable but does not pollute the always-on view.
+        # Capture stays reviewable but does not enter the generated working set.
         store = self.make_store()
         store.add_fact("curated project decision", source="manual", category="project", scope="project")
         store.add_fact("[distilled claude memory] raw transcript dump", source="capture", scope="global")
@@ -50,11 +49,14 @@ class HygieneTest(unittest.TestCase):
         memory_md = store.read_markdown("memory")
         self.assertIn("curated project decision", memory_md)
         self.assertNotIn("distilled claude memory", memory_md)
-        # …but capture is still retrievable on demand.
-        self.assertTrue(store.search("transcript", scope="global"))
+        # Candidate capture is retrievable only when explicitly requested.
+        self.assertFalse(store.search("transcript", scope="global"))
+        self.assertTrue(
+            store.search("transcript", scope="global", include_candidates=True)
+        )
 
     def test_duplicate_episodic_does_not_grow_events(self) -> None:
-        # Bug #4 (bloat): re-capturing the same snippet must not append an event.
+        # Re-capturing the same snippet must not append an event.
         store = self.make_store()
         store.ensure()
 
@@ -66,7 +68,7 @@ class HygieneTest(unittest.TestCase):
 
         store.add_episodic(source="claude", session_id="s1", role="user", text="hello world snippet")
         self.assertEqual(event_count(), 1)
-        # Same content again (what every repeated capture run does) -> no new event.
+        # Repeated content does not create another event.
         store.add_episodic(source="claude", session_id="s1", role="user", text="hello world snippet")
         self.assertEqual(event_count(), 1)
         # prune_events keeps the table bounded.
@@ -74,7 +76,7 @@ class HygieneTest(unittest.TestCase):
 
     def test_repair_cleans_existing_rows(self) -> None:
         store = self.make_store()
-        # Insert corruption directly (bypassing the new boundary) to simulate legacy data.
+        # Insert malformed legacy content directly to exercise repair.
         store.ensure()
         with store.connect() as conn:
             conn.execute(

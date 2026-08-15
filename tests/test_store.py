@@ -76,8 +76,14 @@ class SharedMemoryStoreTest(unittest.TestCase):
         )
         store.consolidate_session(source="codex", session_id="session-1")
 
-        self.assertEqual(store.search("archived turns")[0].memory_type, "resource")
-        self.assertIn("test command", store.search("test command")[0].content)
+        self.assertEqual(
+            store.search("archived turns", include_candidates=True)[0].memory_type,
+            "resource",
+        )
+        self.assertIn(
+            "test command",
+            store.search("test command", include_candidates=True)[0].content,
+        )
 
     def test_supersession_resolves_current_key(self) -> None:
         store = self.make_store()
@@ -309,10 +315,15 @@ class SharedMemoryStoreTest(unittest.TestCase):
             source="manual",
             trust_score=0.50,
         )
-        hits = store.search("widget parser", scope="global")
+        hits = store.search(
+            "widget parser", scope="global", include_candidates=True
+        )
         self.assertEqual(hits[0].fact_id, manual_id)
         self.assertEqual(hits[0].source, "manual")
-        # capture is demoted, not dropped — still reachable in the result set.
+        self.assertFalse(
+            any(h.source == "capture" for h in store.search("widget parser"))
+        )
+        # Candidate capture is available only through an explicit request.
         self.assertTrue(any(h.source == "capture" for h in hits))
 
     def test_prune_events_bounds_fact_add(self) -> None:
@@ -352,9 +363,9 @@ class SharedMemoryStoreTest(unittest.TestCase):
             out: list[list[float]] = []
             for text in texts:
                 lower = text.lower()
-                # Panel-bridge / agent-communication cluster.
+                # Agent-communication cluster.
                 if (
-                    "panel bridge protocol" in lower
+                    "shared relay protocol" in lower
                     or "how do agents talk" in lower
                     or "agents talk to each other" in lower
                 ):
@@ -369,7 +380,7 @@ class SharedMemoryStoreTest(unittest.TestCase):
         try:
             store = self.make_store()
             target_id = store.add_fact(
-                "panel bridge protocol is how multi-agent boards exchange handoffs",
+                "shared relay protocol is how agents exchange handoffs",
                 source="manual",
                 trust_score=0.95,
                 scope="project",
@@ -399,7 +410,7 @@ class SharedMemoryStoreTest(unittest.TestCase):
             self.assertTrue(hits, "hybrid search should return results")
             hit_ids = [h.fact_id for h in hits]
             self.assertIn(target_id, hit_ids)
-            self.assertIn("panel bridge protocol", hits[0].content)
+            self.assertIn("shared relay protocol", hits[0].content)
             self.assertEqual(hits[0].fact_id, target_id)
             # Cosine channel ranked the paraphrase match; scaffolding kept it above the distractor.
             if distractor_id in hit_ids:

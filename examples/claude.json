@@ -5,7 +5,7 @@
       "command": "/absolute/path/to/mneme-memory-mcp/.venv/bin/mneme-memory-mcp",
       "args": [],
       "env": {
-        "HERMES_HOME": "/Users/YOU/.hermes"
+        "MNEME_HOME": "/absolute/path/to/mneme-home"
       }
     }
   }

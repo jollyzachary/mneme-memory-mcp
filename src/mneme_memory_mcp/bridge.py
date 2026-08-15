@@ -93,7 +93,7 @@ def delegate_to_codex(
 
     Defaults to Codex's workspace-write sandbox. Mneme's memory home is added as
     a writable root so the delegated agent can use the shared memory service.
-    The MCP bridge never exposes Codex's danger-full-access mode."""
+    Delegation is limited to the bridge's supported sandbox modes."""
 
     prompt = _require_prompt(prompt)
     workdir = _resolve_cwd(cwd)
@@ -110,9 +110,8 @@ def delegate_to_codex(
         "never",
     ]
     if sandbox == "workspace-write":
-        # The shared Mneme store lives at ~/.hermes, outside the workspace. Make its home a
-        # writable root so the delegate's nested memory MCP writes — and even reads, which
-        # run migrate-on-open — don't hit a readonly database.
+        # The shared store may live outside the workspace. Add its home as a
+        # writable root because store initialization can perform migrations.
         writable_roots = json.dumps([str(resolve_home())])
         command.extend(["-c", f"sandbox_workspace_write.writable_roots={writable_roots}"])
     if model:
@@ -177,7 +176,7 @@ def _mneme_system_prompt(agent_label: str) -> str:
     return (
         "You are being invoked through Mneme Memory MCP as "
         f"{agent_label}. Treat this as a peer-agent delegation.\n\n"
-        "Use the shared Mneme/Hermes memory below for continuity. "
+        "Use the shared Mneme memory below for continuity. "
         "If durable facts are discovered, ask the caller to store them through Mneme memory tools.\n\n"
         f"{summary}"
     )

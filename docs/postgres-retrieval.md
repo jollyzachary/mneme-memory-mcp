@@ -30,14 +30,12 @@ The image is built from pinned multi-architecture release digests:
 - `ghcr.io/evokoa/pgcontext:pg17-v0.2.0`
 - `ghcr.io/evokoa/pggraph:1.0.0`
 
-The wrapper does not include a command that deletes the Docker volume.
-
 ## Install and stage
 
 For a managed global install, include the PostgreSQL retrieval client:
 
 ```bash
-./scripts/install.sh --profile global --profile-confirmed --postgres-retrieval
+./scripts/install.sh --profile global --postgres-retrieval
 ```
 
 For development installs, install both local retrieval extras:
@@ -67,8 +65,8 @@ Apply the copy after reviewing the counts:
 python scripts/migrate_sqlite_to_postgres.py --apply --skip-graph-rebuild
 ```
 
-The Docker service applies pgGraph's trigger-backed sync buffer every minute as
-the internal database administrator. The MCP application role never receives
+The Docker service applies pgGraph's trigger-backed sync buffer every minute
+through the database administrator role. The MCP application role never receives
 graph-administrator privileges.
 
 After a bulk migration, compact the accumulated graph mutations once from the
@@ -84,17 +82,18 @@ explicit relationships. It does not modify or delete the SQLite file.
 
 ## Cutover modes
 
-Set these variables in the environment used to launch the Mneme MCP server:
+Set these variables in the process environment used to launch the Mneme MCP
+server:
 
-```env
-MNEME_RETRIEVAL_BACKEND=postgres
-MNEME_POSTGRES_HOST=127.0.0.1
-MNEME_POSTGRES_PORT=55433
-MNEME_POSTGRES_DATABASE=mneme
-MNEME_POSTGRES_USER=mneme_app
-MNEME_POSTGRES_PASSWORD_FILE=~/.local/share/mneme-memory-mcp/postgres/secrets/app_password
-MNEME_POSTGRES_REQUIRED=0
-MNEME_GRAPH_SYNC_ON_WRITE=0
+```bash
+export MNEME_RETRIEVAL_BACKEND=postgres
+export MNEME_POSTGRES_HOST=127.0.0.1
+export MNEME_POSTGRES_PORT=55433
+export MNEME_POSTGRES_DATABASE=mneme
+export MNEME_POSTGRES_USER=mneme_app
+export MNEME_POSTGRES_PASSWORD_FILE=~/.local/share/mneme-memory-mcp/postgres/secrets/app_password
+export MNEME_POSTGRES_REQUIRED=0
+export MNEME_GRAPH_SYNC_ON_WRITE=0
 ```
 
 The available modes are:

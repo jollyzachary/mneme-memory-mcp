@@ -16,7 +16,7 @@ from .store import (
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mneme-memory",
-        description="Read and write the shared Mneme/Hermes memory layer.",
+        description="Read and write the shared Mneme memory layer.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -48,6 +48,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="project",
         help="Read visibility scope.",
     )
+    search.add_argument(
+        "--include-candidates",
+        action="store_true",
+        help="Include unreviewed automated-memory candidates.",
+    )
 
     recent = subparsers.add_parser("list", help="List recent durable facts.")
     recent.add_argument("--limit", type=int, default=25, help="Maximum results.")
@@ -56,6 +61,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("global", "project", "agent-private", "handoff"),
         default="project",
         help="Read visibility scope.",
+    )
+    recent.add_argument(
+        "--include-candidates",
+        action="store_true",
+        help="Include unreviewed automated-memory candidates.",
     )
 
     add = subparsers.add_parser("add", help="Add a durable fact.")
@@ -208,11 +218,24 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "search":
         print(
             format_facts(
-                store.search(query=args.query, limit=args.limit, scope=args.scope)
+                store.search(
+                    query=args.query,
+                    limit=args.limit,
+                    scope=args.scope,
+                    include_candidates=args.include_candidates,
+                )
             )
         )
     elif args.command == "list":
-        print(format_facts(store.list(limit=args.limit, scope=args.scope)))
+        print(
+            format_facts(
+                store.list(
+                    limit=args.limit,
+                    scope=args.scope,
+                    include_candidates=args.include_candidates,
+                )
+            )
+        )
     elif args.command == "add":
         content = " ".join(args.content)
         fact_id = store.add(

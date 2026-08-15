@@ -15,6 +15,14 @@ MAX_SNIPPET_CHARS = 3200
 MIN_SNIPPET_CHARS = 8
 
 SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(
+            r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----.*?"
+            r"-----END (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----",
+            re.IGNORECASE | re.DOTALL,
+        ),
+        "[private key redacted]",
+    ),
     (re.compile(r"(?i)(authorization:\s*bearer\s+)[^\s'\",]+"), r"\1[redacted]"),
     (re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{20,}"), "Bearer [redacted]"),
     (re.compile(r"\bsk-proj-[A-Za-z0-9_-]{16,}"), "sk-proj-[redacted]"),
@@ -22,9 +30,17 @@ SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bghp_[A-Za-z0-9_]{20,}"), "ghp_[redacted]"),
     (re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}"), "github_pat_[redacted]"),
     (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "AKIA[redacted]"),
+    (re.compile(r"\bAIza[0-9A-Za-z_-]{30,}\b"), "AIza[redacted]"),
+    (re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{20,}\b"), "xox-[redacted]"),
+    (
+        re.compile(r"\b(?:eyJ[A-Za-z0-9_-]+)\.(?:[A-Za-z0-9_-]+)\.(?:[A-Za-z0-9_-]+)\b"),
+        "[JWT redacted]",
+    ),
     (
         re.compile(
-            r"(?i)\b(api[_ -]?key|token|secret|password)\b['\"]?\s*[:=]\s*['\"]?[^'\"\s,}]+"
+            r"(?i)\b(api[_ -]?key|token|secret|password|passwd|"
+            r"aws[_ -]?secret[_ -]?access[_ -]?key|client[_ -]?secret|"
+            r"service[_ -]?role[_ -]?key)\b['\"]?\s*[:=]\s*['\"]?[^'\"\s,}]+"
         ),
         r"\1=[redacted]",
     ),
@@ -451,10 +467,9 @@ def _sanitize_text(value: Any) -> str:
     return text
 
 
-# Tool-call / hook markup that intermittently leaked into memory. Store-side
-# stripping only knows a few shapes and truncation can split tags mid-pattern,
-# so reject markup-bearing snippets outright — capture is low-trust episodic
-# material and a dropped snippet costs nothing.
+# Reject protocol and hook markup before episodic storage. Truncation can split
+# tag boundaries, so capture uses signature rejection in addition to store-side
+# normalization.
 _MARKUP_SIGNATURES = (
     "<parameter",
     "</parameter",

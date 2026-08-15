@@ -5,14 +5,14 @@ build-backend = "hatchling.build"
 [project]
 name = "mneme-memory-mcp"
 version = "0.10.1"
-description = "A local MCP memory and agent-mesh bridge for Claude, Codex, Hermes, and other agents."
+description = "Local-first, governed memory infrastructure for MCP-compatible AI agents."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
   { name = "Zachary Jolly" }
 ]
-keywords = ["mcp", "memory", "claude", "codex", "hermes", "agents"]
+keywords = ["mcp", "memory", "agents", "sqlite", "retrieval"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "License :: OSI Approved :: MIT License",
@@ -38,7 +38,7 @@ dev = [
   "build>=1.2",
   "pytest>=8"
 ]
-# Local hybrid retrieval (C1). Without these, search() stays FTS5+LIKE only.
+# Local hybrid retrieval. Without these, search() stays FTS5+LIKE only.
 embeddings = [
   "sentence-transformers>=5.0,<6",
   "numpy>=1.24,<3"

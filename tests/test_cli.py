@@ -77,9 +77,9 @@ class CliTest(unittest.TestCase):
                     "--scope",
                     "project",
                     "--goal",
-                    "Finish memory overhaul",
+                    "Document the release workflow",
                     "--next-steps",
-                    "run checks",
+                    "review the migration notes",
                 ],
                 memory_home,
             )
@@ -90,7 +90,7 @@ class CliTest(unittest.TestCase):
         self.assertIn("bun test", current)
         self.assertNotIn("pnpm test", current)
         self.assertIn("saved handoff 1", write)
-        self.assertIn("Finish memory overhaul", latest)
+        self.assertIn("Document the release workflow", latest)
 
     def test_health_briefing_feedback_review_and_maintenance(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

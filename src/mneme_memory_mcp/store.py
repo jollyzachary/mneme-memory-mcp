@@ -64,8 +64,8 @@ _SCHEMA_LOCK = threading.RLock()
 def connect_db(db_path: Path | str) -> sqlite3.Connection:
     """Open a SQLite connection with concurrency-safe defaults.
 
-    Every connection sets busy_timeout and WAL so multi-agent writers
-    (Claude/Codex/Hermes) wait briefly instead of raising SQLITE_BUSY.
+    Every connection sets busy_timeout and WAL so concurrent local writers wait
+    briefly instead of raising SQLITE_BUSY.
     """
 
     conn = sqlite3.connect(str(db_path))
@@ -201,8 +201,8 @@ class Handoff:
 class SharedMemoryStore:
     """Local Markdown + SQLite memory store.
 
-    The SQLite event/fact store is the ground truth. USER.md and MEMORY.md are
-    compact generated views for always-loaded context.
+    SQLite is authoritative. USER.md and MEMORY.md are compact generated views
+    for client context.
     """
 
     def __init__(
@@ -455,10 +455,8 @@ class SharedMemoryStore:
                 entry_id = int(row["entry_id"])
                 is_new = False
             conn.commit()
-        # Only log an event for genuinely NEW snippets. Re-capturing the same
-        # transcript (every session-end hook) used to insert a fresh episodic.add
-        # event per already-deduped snippet — 1000 entries had grown 787k events
-        # (~270MB). The event is provenance for a real insert, nothing more.
+        # Create an event only for a new episodic entry. Duplicate capture must
+        # not grow the event log.
         if is_new:
             event_id = self._insert_event(
                 event_type="episodic.add",
@@ -555,16 +553,15 @@ class SharedMemoryStore:
             conn.commit()
         return before - after
 
-    # High-volume, low-value event types that accrue one row per write and must
-    # stay bounded. handoff.write / migration.* are rare and durable — never pruned.
+    # Bound high-volume event types while retaining handoff and migration events.
     _PRUNABLE_EVENT_TYPES = ("episodic.add", "fact.add", "memory.retrieved")
 
     def prune_events(self, *, max_age_days: int = 30, keep_recent: int = 20000) -> int:
-        """Bound the audit log. handoff.write and migration events are rare, durable
-        provenance and kept forever; the high-volume per-write events (episodic.add,
-        fact.add) are pruned by age past a hard recency cap so the events table can't
-        balloon again. Pruning old fact.add rows drops the event→fact provenance link
-        for old facts only; the facts themselves are untouched."""
+        """Bound high-volume audit events while retaining handoff and migration events.
+
+        Pruning old ``fact.add`` events removes only the event-to-fact provenance
+        link; facts remain intact.
+        """
 
         self.ensure()
         with closing(self.connect()) as conn:
@@ -639,8 +636,7 @@ class SharedMemoryStore:
         return before - after
 
     def maybe_vacuum(self, *, min_free_fraction: float = 0.25) -> bool:
-        """Reclaim file space once pruning has freed a meaningful fraction of pages.
-        The DB once grew to 275MB of dead weight; this keeps prune wins on disk."""
+        """Reclaim file space after pruning frees enough database pages."""
 
         self.ensure()
         with closing(self.connect()) as conn:
@@ -656,6 +652,8 @@ class SharedMemoryStore:
         limit: int = 25,
         include_superseded: bool = False,
         scope: MemoryScope = "project",
+        *,
+        include_candidates: bool = False,
     ) -> list[Fact]:
         self.ensure()
         limit = _bounded_limit(limit, upper=100)
@@ -663,7 +661,11 @@ class SharedMemoryStore:
         params: list[object] = []
         if not include_superseded:
             clauses.append("superseded_by IS NULL")
-        clauses.append("state IN ('trusted', 'candidate')")
+        clauses.append(
+            "state IN ('trusted', 'candidate')"
+            if include_candidates
+            else "state = 'trusted'"
+        )
         clauses.append(f"scope IN ({','.join('?' for _ in _visible_scopes(scope))})")
         params.extend(_visible_scopes(scope))
         where = f"WHERE {' AND '.join(clauses)}"
@@ -687,6 +689,7 @@ class SharedMemoryStore:
         scope: MemoryScope = "project",
         *,
         record: bool = True,
+        include_candidates: bool = False,
     ) -> list[Fact]:
         self.ensure()
         query = query.strip()
@@ -708,6 +711,7 @@ class SharedMemoryStore:
                     fact
                     for fact in _facts_by_ids(conn, list(postgres_scores.keys()))
                     if fact.scope in scopes
+                    and (include_candidates or fact.state == "trusted")
                 ]
                 results = _rank_search_facts(facts, postgres_scores)[:limit]
                 if record and results:
@@ -731,6 +735,7 @@ class SharedMemoryStore:
                 fact
                 for fact in _facts_by_ids(conn, list(rrf_scores.keys()))
                 if fact.scope in scopes
+                and (include_candidates or fact.state == "trusted")
             ]
             results = _rank_search_facts(facts, rrf_scores)[:limit]
             if record and results:
@@ -767,19 +772,30 @@ class SharedMemoryStore:
             )
             return {}, False
 
-    def current(self, key: str, scope: MemoryScope = "project") -> Fact | None:
+    def current(
+        self,
+        key: str,
+        scope: MemoryScope = "project",
+        *,
+        include_candidates: bool = False,
+    ) -> Fact | None:
         self.ensure()
         normalized = _normalize_key(key)
         if not normalized:
             return None
         scopes = _visible_scopes(scope)
+        state_clause = (
+            "state IN ('trusted', 'candidate')"
+            if include_candidates
+            else "state = 'trusted'"
+        )
         with closing(self.connect()) as conn:
             rows = conn.execute(
                 f"""
                 SELECT {_fact_select_sql()}
                 FROM facts
                 WHERE key = ? AND superseded_by IS NULL
-                  AND state IN ('trusted', 'candidate')
+                  AND {state_clause}
                   AND scope IN ({",".join("?" for _ in scopes)})
                 """,
                 (normalized, *scopes),
@@ -1527,13 +1543,10 @@ class SharedMemoryStore:
         return _row_to_handoff(row) if row else None
 
     def consolidate(self, *, user_limit: int = 12, memory_limit: int = 24) -> None:
-        """Regenerate small USER.md and MEMORY.md working-set views.
+        """Regenerate bounded USER.md and MEMORY.md working-set views.
 
-        The always-loaded views are built from *curated* facts (manual writes and
-        handoffs), queried directly so an important-but-older fact is never pushed
-        out of the window by a flood of recent capture entries. Capture-distilled
-        facts stay in the DB and remain searchable — they just don't pollute the
-        always-on context.
+        Generated views use trusted curated facts. Capture-derived candidates
+        remain in the database and require explicit candidate retrieval or review.
         """
 
         self.ensure()
@@ -1559,11 +1572,11 @@ class SharedMemoryStore:
     def _working_set_facts(
         self, *, user: bool, limit: int, scope: MemoryScope = "project"
     ) -> list[Fact]:
-        """Curated facts for an always-loaded view, newest first and deduped.
+        """Curated facts for a generated working set, ranked and deduplicated.
 
         USER.md draws identity/preferences (`user_pref`); MEMORY.md draws project
-        knowledge. Both exclude `source='capture'` so the always-on context stays
-        clean — capture stays reachable through `search`.
+        knowledge. Both exclude `source='capture'`; candidate-inclusive search and
+        review remain available separately.
         """
 
         if user:
@@ -1591,8 +1604,10 @@ class SharedMemoryStore:
         return _dedupe_by_content(facts)[: max(1, limit)]
 
     def repair_corrupted_content(self) -> int:
-        """One-time cleanup: re-normalize every fact so previously-stored tool-call
-        markup is stripped. Returns the number of rows changed."""
+        """Normalize existing facts and remove protocol markup.
+
+        Returns the number of rows changed.
+        """
 
         self.ensure()
         changed = 0
@@ -1796,11 +1811,9 @@ class SharedMemoryStore:
                     else:
                         superseded_by = current.fact_id
             else:
-                # Keyless near-duplicates used to pile up and only got hidden at
-                # view time; supersede them at write time instead so the newest
-                # restatement is the single current fact.
-                # ponytail: first-8-significant-words marker (same as the view
-                # dedupe); upgrade to similarity scoring if false merges show up.
+                # Supersede keyless near-duplicates at write time. Use the
+                # generated-view marker as a candidate filter, then confirm with
+                # bounded similarity scoring.
                 marker = _content_marker(content)
                 candidates = conn.execute(
                     """
@@ -2223,7 +2236,7 @@ def _row_to_fact(row: sqlite3.Row) -> Fact:
 
 
 def _quarantine_unsafe_existing(conn: sqlite3.Connection) -> None:
-    """One-time v9 safety pass over legacy durable facts."""
+    """Quarantine unsafe facts written by earlier schema versions."""
 
     rows = conn.execute(
         """
@@ -2615,10 +2628,8 @@ def _row_to_handoff(row: sqlite3.Row) -> Handoff:
     )
 
 
-# A buggy MCP client occasionally serializes a tool call so that the next
-# parameter's opening markup bleeds into `content` (e.g. it ends with
-# `</content> <parameter name="category">project`). The store is ground truth,
-# so it must never persist tool-call scaffolding — strip it at the boundary.
+# Strip malformed MCP tool-call markup at the write boundary so protocol
+# scaffolding cannot enter durable memory.
 _TOOL_MARKUP_RE = re.compile(
     r"</?content>\s*<parameter\b.*$", re.IGNORECASE | re.DOTALL
 )
@@ -2637,11 +2648,9 @@ def _normalize_content(content: str | None) -> str:
     return re.sub(r"\s+", " ", _strip_tool_markup(content or "")).strip()
 
 
-# --- Security: agent-authored writes are untrusted until validated -------------------
-# A durable memory is only as trustworthy as its writer. Oversized content is rejected;
-# content that reads like a prompt-injection / poisoning payload is quarantined — forced
-# to agent-private scope, trust floored, and tagged — so it can never surface in a shared
-# read or the always-on working set, while staying in the store for audit.
+# --- Durable-write validation ---------------------------------------------------------
+# Reject oversized or secret-like content. Quarantine suspected prompt injection
+# in agent-private scope so it remains reviewable without entering normal recall.
 MAX_FACT_CHARS = 20_000
 
 _INJECTION_PATTERNS = tuple(
@@ -2687,9 +2696,11 @@ def _screen_fact_write(
     tags: str,
     state: str,
 ) -> tuple[str, float, str, str]:
-    """Untrusted-until-validated gate for a durable write. Rejects oversized content and
-    secret-like content, and quarantines suspected injection/poisoning. Returns
-    the (possibly adjusted) scope, trust, tags, and lifecycle state."""
+    """Validate a durable write and return its governed metadata.
+
+    Oversized and secret-like content is rejected. Suspected prompt injection is
+    quarantined with restricted scope and trust.
+    """
     if len(content) > MAX_FACT_CHARS:
         raise ValueError(
             f"fact content too long ({len(content)} chars; max {MAX_FACT_CHARS}) — refusing durable write"
@@ -2968,7 +2979,7 @@ def _near_duplicate(left: str, right: str) -> bool:
 
 def _dedupe_by_content(facts: list[Fact]) -> list[Fact]:
     """Collapse near-duplicates so keyless facts that restate the same thing don't
-    both reach the always-on view. Keyed facts dedupe by key; the rest by their
+    both reach a generated view. Keyed facts dedupe by key; the rest by their
     first 8 significant words (input order is preserved)."""
 
     seen: set[str] = set()
@@ -2998,9 +3009,8 @@ def _visible_scopes(scope: str) -> tuple[str, ...]:
 
 
 def _fact_rank_key(fact: Fact) -> tuple[int, float, tuple[int, ...], int]:
-    # Curated facts (manual/handoff) outrank auto-distilled capture so a search
-    # surfaces real knowledge before transcript noise — capture stays reachable,
-    # just never floods the top of the result set.
+    # Curated facts outrank capture-derived candidates while explicit candidate
+    # retrieval remains available.
     curated = 0 if fact.source == "capture" else 1
     return (curated, fact.trust_score, _parse_version(fact.version), fact.fact_id)
 
@@ -3205,8 +3215,7 @@ def _short_hash(text: str) -> str:
 
 
 def _strip_preamble(text: str) -> str:
-    """Verbalizable-bottleneck cleanup: drop 'remember that...' style framing so the
-    stored fact is the fact itself."""
+    """Remove request framing so the stored value is the fact itself."""
     text = re.sub(r"(?i)^(please\s+)?remember\s+(that\s+)?", "", text)
     return re.sub(r"(?i)^(note\s+that|important:)\s*", "", text)
 
@@ -3219,7 +3228,3 @@ def _truncate(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 16)].rstrip() + " ... [truncated]"
-
-
-# TODO(mneme): add optional embedding and temporal/entity graph indexes beside FTS5.
-# Keep FTS as the default exact-symbol path; merge/dedupe semantic/graph hits here.
