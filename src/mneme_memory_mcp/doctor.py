@@ -35,6 +35,7 @@ def status_lines() -> list[str]:
         f"embedding coverage: {health['embedded_facts']}/{health['embedding_eligible_facts']}",
         f"retrieval backend: {health['retrieval_backend']}",
         f"pending PostgreSQL sync: {health['pending_postgres_sync']}",
+        f"retrying PostgreSQL sync: {health['retrying_postgres_sync']}",
         f"Claude CLI: {_which('claude')}",
         f"Codex CLI: {_which('codex')}",
         f"Node: {_which('node')}",

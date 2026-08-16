@@ -184,6 +184,8 @@ Run `mneme-memory --help` for the CLI command surface.
 
 ```text
 ~/.hermes/
+├── backups/
+│   └── mneme-auto-*.db
 ├── memory_store.db
 └── memories/
     ├── USER.md
@@ -210,6 +212,13 @@ The migration command is a dry run until `--apply` is supplied. Start in `dual`
 mode, compare recall and mirror counts, and move to `postgres` only after the
 derived index is healthy. See [PostgreSQL retrieval](docs/postgres-retrieval.md)
 for the full design and rollback procedure.
+
+SQLite remains authoritative throughout. Mneme repairs failed mirror writes in
+the background with adaptive backoff, bounds pgGraph expansion behind a short
+fail-soft timeout and circuit breaker, and falls back to SQLite recall when the
+derived PostgreSQL service is unavailable. One elected local worker performs
+repair and creates a verified SQLite snapshot daily, retaining the latest 30
+automatic backups.
 
 ## Security boundary
 

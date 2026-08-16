@@ -11,7 +11,13 @@ A PostgreSQL search runs four candidate branches:
 1. PostgreSQL full-text search over content, keys, tags, categories, and memory types.
 2. Exact substring and symbol matching.
 3. Filtered pgContext HNSW search with the existing pinned MiniLM embeddings.
-4. pgGraph expansion from the best direct matches.
+4. Bounded two-hop pgGraph expansion from the best direct matches. This
+   enrichment lane has its own short timeout and savepoint; an unhealthy or
+   rebuilding graph cannot discard valid lexical, exact, or pgContext results.
+   Three consecutive failures open a 30-second process-local circuit breaker
+   so repeated chat requests stay fast while database maintenance recovers.
+   `memory_health` exposes graph attempts, successes, failures, recent and
+   moving-average latency, the last error, and circuit state.
 
 Weighted Reciprocal Rank Fusion combines the branches. Mneme then loads the selected facts from SQLite and applies its existing trust, importance, feedback, source, recency, and supersession rules. Project searches can see global and project facts; the adapter searches each vector tenant separately and passes the same tenant to pgGraph.
 
@@ -30,12 +36,14 @@ The image is built from pinned multi-architecture release digests:
 - `ghcr.io/evokoa/pgcontext:pg17-v0.2.0`
 - `ghcr.io/evokoa/pggraph:1.0.0`
 
+The wrapper does not include a command that deletes the Docker volume.
+
 ## Install and stage
 
 For a managed global install, include the PostgreSQL retrieval client:
 
 ```bash
-./scripts/install.sh --profile global --postgres-retrieval
+./scripts/install.sh --profile global --profile-confirmed --postgres-retrieval
 ```
 
 For development installs, install both local retrieval extras:
@@ -65,12 +73,16 @@ Apply the copy after reviewing the counts:
 python scripts/migrate_sqlite_to_postgres.py --apply --skip-graph-rebuild
 ```
 
-The Docker service applies pgGraph's trigger-backed sync buffer every minute
-through the database administrator role. The MCP application role never receives
+The Docker service runs pgGraph's adaptive scheduled maintenance every minute
+as the internal database administrator. That single non-overlapping job decides
+whether to apply sync, compact, vacuum, or repair; a second unconditional sync
+job must not run beside it. The MCP application role never receives
 graph-administrator privileges.
 
-After a bulk migration, compact the accumulated graph mutations once from the
-container's administrator session:
+After a bulk migration, rebuild the derived graph once from the container's
+administrator session. Do not leave a full-corpus migration behind
+`--skip-graph-rebuild`: its trigger log can exceed the bounded incremental
+mutation buffer.
 
 ```bash
 docker exec mneme-postgres psql -U mneme_admin -d mneme \
@@ -82,18 +94,18 @@ explicit relationships. It does not modify or delete the SQLite file.
 
 ## Cutover modes
 
-Set these variables in the process environment used to launch the Mneme MCP
-server:
+Set these variables in the environment used to launch the Mneme MCP server:
 
-```bash
-export MNEME_RETRIEVAL_BACKEND=postgres
-export MNEME_POSTGRES_HOST=127.0.0.1
-export MNEME_POSTGRES_PORT=55433
-export MNEME_POSTGRES_DATABASE=mneme
-export MNEME_POSTGRES_USER=mneme_app
-export MNEME_POSTGRES_PASSWORD_FILE=~/.local/share/mneme-memory-mcp/postgres/secrets/app_password
-export MNEME_POSTGRES_REQUIRED=0
-export MNEME_GRAPH_SYNC_ON_WRITE=0
+```env
+MNEME_RETRIEVAL_BACKEND=postgres
+MNEME_POSTGRES_HOST=127.0.0.1
+MNEME_POSTGRES_PORT=55433
+MNEME_POSTGRES_DATABASE=mneme
+MNEME_POSTGRES_USER=mneme_app
+MNEME_POSTGRES_PASSWORD_FILE=~/.local/share/mneme-memory-mcp/postgres/secrets/app_password
+MNEME_POSTGRES_CONNECT_TIMEOUT=1
+MNEME_POSTGRES_REQUIRED=0
+MNEME_GRAPH_SYNC_ON_WRITE=0
 ```
 
 The available modes are:
@@ -104,16 +116,19 @@ The available modes are:
 | `dual` | PostgreSQL and SQLite both retrieve candidates. Mneme fuses the scores and mirrors new writes to PostgreSQL. |
 | `postgres` | PostgreSQL retrieves candidates. SQLite still applies governance and ranking. |
 
-Start with `dual`. Move to `postgres` after comparing result quality and confirming that mirror counts stay aligned. `MNEME_POSTGRES_REQUIRED=0` keeps SQLite fallback available if PostgreSQL stops. Set it to `1` only when a failed derived service should fail the memory request.
+Start with `dual`. Move to `postgres` after comparing result quality and confirming that mirror counts stay aligned. Keep `MNEME_POSTGRES_REQUIRED=0` for normal interactive use so SQLite provides emergency recall if the derived service stops. Set it to `1` only for diagnostics that intentionally require a hard PostgreSQL failure.
 
 For a machine-global installation, put these variables in the owner-only file
 `~/.config/mneme-memory/env`. Every process opening the canonical `~/.hermes`
 store loads that file, including capture hooks and direct CLI commands. Project
 stores do not inherit it.
 
-In `postgres` mode, normal candidate retrieval comes from PostgreSQL,
-pgContext, and pgGraph. SQLite remains the write journal, governance layer,
-synchronization source, and emergency fallback.
+The global Farynth installation uses `postgres`: normal retrieval comes only
+from PostgreSQL, pgContext, and pgGraph. SQLite remains the write journal,
+governance layer, synchronization source, and emergency fallback.
+An unavailable local PostgreSQL service is detected within one second; the
+process then opens a 15-second availability circuit so subsequent chat recall
+uses the emergency path immediately instead of repeating connection waits.
 
 ## Relationships
 
@@ -140,7 +155,27 @@ Use `memory_links` to inspect relationships and `memory_unlink` to remove one wi
 
 ## Interrupted writes
 
-Mneme records PostgreSQL mirror work in a SQLite outbox before it attempts the derived write. A later PostgreSQL search retries a bounded batch from that outbox. `memory_health` and `mneme-memory-doctor` report the pending count. This covers short Docker restarts without blocking a durable SQLite write or requiring an immediate full copy.
+Mneme records PostgreSQL mirror work in a SQLite outbox before it attempts the
+derived write. On macOS and Linux, long-lived MCP processes elect one repair
+leader with a blocking kernel file lock: non-leaders consume no polling CPU and
+the operating system releases leadership immediately after a crash. A
+crash-expiring SQLite lease provides health visibility and the cross-platform
+fallback. The leader wakes immediately for same-process work, follows queued
+retry deadlines, and sleeps up to 15 seconds while idle; exponential retry
+backoff is capped at five minutes.
+Search never waits for mirror repair, and a failed mirror cannot turn an
+already-durable SQLite write into a user-visible write error. `memory_health`
+and `mneme-memory-doctor` report pending and retrying counts. Revision-checked
+outbox acknowledgements preserve a newer update when multiple agents write the
+same fact while an older mirror attempt is in flight. This covers short
+Docker restarts without blocking a durable write or requiring an immediate
+full copy.
+
+The elected worker also creates one verified online SQLite snapshot per day
+under `~/.hermes/backups/mneme-auto-*.db`. It publishes a snapshot only after
+`PRAGMA integrity_check` succeeds and retains the newest 30 automatic
+snapshots. Retention applies only to the `mneme-auto-` namespace; existing
+manual and migration backups are never touched.
 
 ## Rollback
 
