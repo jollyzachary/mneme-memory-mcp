@@ -64,7 +64,7 @@ class GlobalMemoryV1Test(unittest.TestCase):
         self.assertEqual(rows[2]["state"], "quarantined")
         self.assertAlmostEqual(rows[0]["importance"], 0.9)
         self.assertEqual(rows[0]["reinforcement_count"], 1)
-        self.assertEqual(version, 11)
+        self.assertEqual(version, 13)
 
     def test_exact_duplicate_reinforces_existing_fact(self) -> None:
         store = self.make_store()
@@ -168,7 +168,7 @@ class GlobalMemoryV1Test(unittest.TestCase):
 
         self.assertEqual(health["status"], "ok")
         self.assertEqual(health["integrity"], "ok")
-        self.assertEqual(health["schema_version"], 11)
+        self.assertEqual(health["schema_version"], 13)
         self.assertIn("all-MiniLM-L6-v2@", health["embedding_model"])
         if health["embedding_backend"] != "unavailable":
             self.assertEqual(
