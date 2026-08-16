@@ -4,17 +4,6 @@ Mneme Memory MCP welcomes reports that help protect users and their local
 memory data. Please report suspected vulnerabilities privately so they can be
 investigated before technical details are published.
 
-## Supported versions
-
-| Version | Security updates |
-| --- | --- |
-| Latest revision on `main` | Supported |
-| Earlier commits and development snapshots | Not supported |
-
-Mneme is pre-1.0 and does not yet publish versioned releases. Security fixes
-land on `main`. Please confirm that a report applies to the current revision
-before submitting it.
-
 ## Report a vulnerability
 
 Use [GitHub Private Vulnerability Reporting](https://github.com/jollyzachary/mneme-memory-mcp/security/advisories/new)
