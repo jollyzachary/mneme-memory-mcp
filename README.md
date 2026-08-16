@@ -80,50 +80,44 @@ Handoffs record the goal, current state, decisions, blockers, evidence, and next
 steps. They provide continuity without copying an entire transcript into the
 next session.
 
-## Give this to your AI agent
+## Quick start
 
-Paste the prompt below into a local coding agent with terminal access. It tells
-the agent to use Mneme's installer, preserve existing data, and verify the
-connection when setup is complete.
+### Give this to your AI agent
+
+Paste this into a local AI coding agent with terminal access:
 
 ```text
-Install and configure Mneme Memory MCP from
-https://github.com/jollyzachary/mneme-memory-mcp on this computer.
+Set up Mneme Memory MCP on my computer so I can start using it with my local AI
+agents.
 
-1. Read README.md, docs/continuity.md, and the installer help for this operating
-   system before changing anything.
-2. Inspect any existing Mneme installation, MNEME_HOME value, and MCP client
-   configuration. Preserve existing memory and unrelated configuration. Do not
-   print memory contents, credentials, or secrets.
-3. Use the global profile unless I request isolated project memory or a
-   server-only installation. If an existing setup makes that choice unsafe,
-   stop and explain the conflict.
-4. Clone the repository and use its provided installer:
-   - macOS or Linux: ./scripts/install.sh --profile global
-   - Windows PowerShell: powershell -ExecutionPolicy Bypass -File
-     .\scripts\install.ps1 -Profile global
-   Change only the profile argument when a different profile is required. Do
-   not replace the installer with a custom setup unless the installer fails.
-5. Configure the supported MCP clients already installed on this computer. Do
-   not install unrelated agent runtimes or enable PostgreSQL retrieval or agent
-   delegation unless I ask.
-6. Run the installed mneme-memory-doctor and mneme-memory-continuity status
-   commands. Confirm the selected profile, memory home, server command, and each
-   configured client. Tell me which applications must restart, then give me one
-   harmless store-and-recall check I can use after the restart.
+Repository: https://github.com/jollyzachary/mneme-memory-mcp
 
-Stop before overwriting an existing installation, moving a memory home that
-contains data, or replacing client configuration you cannot preserve.
+1. Check that Git, Python 3.10 or newer, and at least one MCP-compatible AI
+   client are installed.
+2. Clone the repository into a suitable local folder.
+3. Read README.md and docs/continuity.md, then run the included installer for my
+   operating system with the global profile. Use the repository's documented
+   installer rather than creating a custom installation process.
+4. Connect Mneme to each supported AI client already installed on my computer.
+   Preserve unrelated client settings and any existing Mneme memory.
+5. Run mneme-memory-doctor and mneme-memory-continuity status. Resolve any setup
+   errors, report the memory home and connected clients, and tell me which
+   applications to restart.
+6. After the restart, help me save one harmless preference and recall it in a
+   new session so we can confirm Mneme is working.
+
+Keep Mneme's durable store local. Do not enable optional PostgreSQL retrieval
+or agent delegation unless I request it.
 ```
 
-## Quick start
+### Install it yourself
+
+macOS or Linux:
 
 ```bash
 git clone https://github.com/jollyzachary/mneme-memory-mcp.git
 cd mneme-memory-mcp
-python3 -m venv .venv
-.venv/bin/python -m pip install -e .
-.venv/bin/mneme-memory-mcp
+./scripts/install.sh --profile global
 ```
 
 Windows PowerShell:
@@ -131,13 +125,14 @@ Windows PowerShell:
 ```powershell
 git clone https://github.com/jollyzachary/mneme-memory-mcp.git
 cd mneme-memory-mcp
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e .
-.\.venv\Scripts\python.exe -m mneme_memory_mcp
+powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Profile global
 ```
 
-The default memory home is `~/.hermes`. Set `MNEME_HOME` in the MCP client's
-process environment to choose another location.
+The global profile creates a managed Python environment, initializes the default
+memory home at `~/.hermes`, and configures supported clients that are already
+installed. Restart those clients after installation so they reload their MCP
+configuration. See [Client continuity](docs/continuity.md) for isolated project
+memory and server-only profiles.
 
 ## Connect an MCP client
 
