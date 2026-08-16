@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -13,6 +16,58 @@ DEFAULT_PORT = 55433
 DEFAULT_DATABASE = "mneme"
 DEFAULT_USER = "mneme_app"
 _ENTITY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,119}$")
+_LOGGER = logging.getLogger(__name__)
+_GRAPH_RUNTIME_LOCK = threading.Lock()
+_GRAPH_RUNTIME: dict[str, Any] = {
+    "attempts": 0,
+    "successes": 0,
+    "failures": 0,
+    "consecutive_failures": 0,
+    "circuit_open_until": 0.0,
+    "last_latency_ms": 0.0,
+    "ewma_latency_ms": 0.0,
+    "last_error": "",
+}
+
+
+def _graph_runtime_snapshot() -> dict[str, Any]:
+    with _GRAPH_RUNTIME_LOCK:
+        snapshot = dict(_GRAPH_RUNTIME)
+    remaining = max(0.0, float(snapshot.pop("circuit_open_until")) - time.monotonic())
+    snapshot["circuit_open"] = remaining > 0
+    snapshot["circuit_retry_seconds"] = round(remaining, 3)
+    snapshot["last_latency_ms"] = round(float(snapshot["last_latency_ms"]), 3)
+    snapshot["ewma_latency_ms"] = round(float(snapshot["ewma_latency_ms"]), 3)
+    return snapshot
+
+
+def _record_graph_success(latency_ms: float) -> None:
+    with _GRAPH_RUNTIME_LOCK:
+        previous = float(_GRAPH_RUNTIME["ewma_latency_ms"])
+        _GRAPH_RUNTIME["attempts"] += 1
+        _GRAPH_RUNTIME["successes"] += 1
+        _GRAPH_RUNTIME["consecutive_failures"] = 0
+        _GRAPH_RUNTIME["circuit_open_until"] = 0.0
+        _GRAPH_RUNTIME["last_latency_ms"] = latency_ms
+        _GRAPH_RUNTIME["ewma_latency_ms"] = (
+            latency_ms if previous <= 0 else (0.2 * latency_ms) + (0.8 * previous)
+        )
+        _GRAPH_RUNTIME["last_error"] = ""
+
+
+def _record_graph_failure(exc: Exception, latency_ms: float) -> None:
+    with _GRAPH_RUNTIME_LOCK:
+        previous = float(_GRAPH_RUNTIME["ewma_latency_ms"])
+        _GRAPH_RUNTIME["attempts"] += 1
+        _GRAPH_RUNTIME["failures"] += 1
+        _GRAPH_RUNTIME["consecutive_failures"] += 1
+        _GRAPH_RUNTIME["last_latency_ms"] = latency_ms
+        _GRAPH_RUNTIME["ewma_latency_ms"] = (
+            latency_ms if previous <= 0 else (0.2 * latency_ms) + (0.8 * previous)
+        )
+        _GRAPH_RUNTIME["last_error"] = str(exc)[:300]
+        if int(_GRAPH_RUNTIME["consecutive_failures"]) >= 3:
+            _GRAPH_RUNTIME["circuit_open_until"] = time.monotonic() + 30.0
 
 
 class PostgresRetrievalError(RuntimeError):
@@ -28,6 +83,7 @@ class PostgresSettings:
     password_file: Path
     connect_timeout: int = 3
     statement_timeout_ms: int = 5_000
+    graph_statement_timeout_ms: int = 750
 
     @classmethod
     def from_environment(cls) -> PostgresSettings:
@@ -49,10 +105,18 @@ class PostgresSettings:
                 os.environ.get("MNEME_POSTGRES_PASSWORD_FILE", str(default_secret))
             ).expanduser(),
             connect_timeout=max(
-                1, int(os.environ.get("MNEME_POSTGRES_CONNECT_TIMEOUT", "3"))
+                1, int(os.environ.get("MNEME_POSTGRES_CONNECT_TIMEOUT", "1"))
             ),
             statement_timeout_ms=max(
                 500, int(os.environ.get("MNEME_POSTGRES_STATEMENT_TIMEOUT_MS", "5000"))
+            ),
+            graph_statement_timeout_ms=max(
+                100,
+                int(
+                    os.environ.get(
+                        "MNEME_POSTGRES_GRAPH_STATEMENT_TIMEOUT_MS", "750"
+                    )
+                ),
             ),
         )
 
@@ -76,9 +140,9 @@ def postgres_required() -> bool:
 class PostgresRetrievalPlane:
     """Derived pgContext + pgGraph retrieval plane for Mneme.
 
-    SQLite remains the authoritative journal. This class mirrors facts into
-    PostgreSQL, retrieves candidate ids, and returns those ids to the SQLite
-    trust and supersession ranker.
+    SQLite remains the governed journal during the first cutover stage. This
+    class mirrors facts into PostgreSQL, retrieves candidate ids, and returns
+    those ids to the existing SQLite trust/supersession ranker.
     """
 
     def __init__(self, settings: PostgresSettings | None = None) -> None:
@@ -148,11 +212,57 @@ class PostgresRetrievalPlane:
                     3,
                 )
                 if seed_ids:
-                    graph = self._graph_ids(cur, seed_ids, scopes, candidate_limit)
+                    graph = self._graph_ids_best_effort(
+                        cur, seed_ids, scopes, candidate_limit
+                    )
                     if graph:
                         rankings.append((graph, 0.55))
 
         return _weighted_rrf(rankings)
+
+    def _graph_ids_best_effort(
+        self,
+        cur: Any,
+        seed_ids: Sequence[int],
+        scopes: Sequence[str],
+        limit: int,
+    ) -> list[int]:
+        """Bound graph enrichment without sacrificing direct PostgreSQL recall.
+
+        pgGraph is a derived ranking lane. Lexical, exact, and pgContext hits
+        remain valid when its index is rebuilding, compacting, or temporarily
+        unhealthy. A savepoint is required because a PostgreSQL statement
+        timeout otherwise aborts the entire search transaction.
+        """
+
+        runtime = _graph_runtime_snapshot()
+        if bool(runtime["circuit_open"]):
+            return []
+
+        savepoint = "mneme_graph_expansion"
+        started = time.perf_counter()
+        cur.execute(f"SAVEPOINT {savepoint}")
+        try:
+            cur.execute(
+                "SELECT set_config('statement_timeout', %s, true)",
+                (str(self.settings.graph_statement_timeout_ms),),
+            )
+            graph = self._graph_ids(cur, seed_ids, scopes, limit)
+        except Exception as exc:  # noqa: BLE001 - derived lane must fail soft
+            cur.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+            cur.execute(f"RELEASE SAVEPOINT {savepoint}")
+            latency_ms = (time.perf_counter() - started) * 1_000
+            _record_graph_failure(exc, latency_ms)
+            _LOGGER.warning("pgGraph enrichment skipped: %s", exc)
+            return []
+
+        cur.execute(f"RELEASE SAVEPOINT {savepoint}")
+        cur.execute(
+            "SELECT set_config('statement_timeout', %s, true)",
+            (str(self.settings.statement_timeout_ms),),
+        )
+        _record_graph_success((time.perf_counter() - started) * 1_000)
+        return graph
 
     @staticmethod
     def _lexical_ids(
@@ -279,7 +389,7 @@ class PostgresRetrievalPlane:
                 CROSS JOIN LATERAL graph.traverse(
                     'mneme.facts'::regclass::oid,
                     seed::text,
-                    max_depth => 4,
+                    max_depth => 2,
                     direction => 'any',
                     include_start => false,
                     hydrate => false,
@@ -372,6 +482,66 @@ class PostgresRetrievalPlane:
                                 mneme.facts.embedding_model
                             ),
                             is_current = EXCLUDED.is_current
+                        WHERE (
+                            mneme.facts.content,
+                            mneme.facts.category,
+                            mneme.facts.tags,
+                            mneme.facts.trust_score,
+                            mneme.facts.importance,
+                            mneme.facts.reinforcement_count,
+                            mneme.facts.retrieval_count,
+                            mneme.facts.helpful_count,
+                            mneme.facts.unhelpful_count,
+                            mneme.facts.last_retrieved_at,
+                            mneme.facts.state,
+                            mneme.facts.created_at,
+                            mneme.facts.updated_at,
+                            mneme.facts.memory_type,
+                            mneme.facts.scope,
+                            mneme.facts.key,
+                            mneme.facts.version,
+                            mneme.facts.supersedes_id,
+                            mneme.facts.superseded_by,
+                            mneme.facts.source,
+                            mneme.facts.provenance,
+                            mneme.facts.embedding_model,
+                            mneme.facts.is_current
+                        ) IS DISTINCT FROM (
+                            EXCLUDED.content,
+                            EXCLUDED.category,
+                            EXCLUDED.tags,
+                            EXCLUDED.trust_score,
+                            EXCLUDED.importance,
+                            EXCLUDED.reinforcement_count,
+                            EXCLUDED.retrieval_count,
+                            EXCLUDED.helpful_count,
+                            EXCLUDED.unhelpful_count,
+                            EXCLUDED.last_retrieved_at,
+                            EXCLUDED.state,
+                            EXCLUDED.created_at,
+                            EXCLUDED.updated_at,
+                            EXCLUDED.memory_type,
+                            EXCLUDED.scope,
+                            EXCLUDED.key,
+                            EXCLUDED.version,
+                            EXCLUDED.supersedes_id,
+                            EXCLUDED.superseded_by,
+                            EXCLUDED.source,
+                            EXCLUDED.provenance,
+                            COALESCE(
+                                EXCLUDED.embedding_model,
+                                mneme.facts.embedding_model
+                            ),
+                            EXCLUDED.is_current
+                        )
+                        OR (
+                            EXCLUDED.embedding IS NOT NULL
+                            AND (
+                                mneme.facts.embedding IS NULL
+                                OR mneme.facts.embedding::text
+                                   IS DISTINCT FROM EXCLUDED.embedding::text
+                            )
+                        )
                         """,
                         {
                             **dict(fact),
@@ -399,20 +569,32 @@ class PostgresRetrievalPlane:
     def _replace_fact_entities(cur: Any, fact: Mapping[str, Any]) -> None:
         fact_id = int(fact["fact_id"])
         scope = str(fact.get("scope") or "global")
-        cur.execute("DELETE FROM mneme.fact_entities WHERE fact_id = %s", (fact_id,))
         entities = _structured_entities(fact)
+        desired_bridge_ids: list[str] = []
         for kind, canonical in entities:
             cur.execute(
                 """
                 INSERT INTO mneme.entities (scope, kind, canonical)
                 VALUES (%s, %s, %s)
-                ON CONFLICT (scope, kind, canonical) DO UPDATE
-                SET canonical = EXCLUDED.canonical
+                ON CONFLICT (scope, kind, canonical) DO NOTHING
                 RETURNING entity_id
                 """,
                 (scope, kind, canonical),
             )
-            entity_id = int(cur.fetchone()[0])
+            inserted = cur.fetchone()
+            if inserted is None:
+                cur.execute(
+                    """
+                    SELECT entity_id
+                    FROM mneme.entities
+                    WHERE scope = %s AND kind = %s AND canonical = %s
+                    """,
+                    (scope, kind, canonical),
+                )
+                inserted = cur.fetchone()
+            entity_id = int(inserted[0])
+            bridge_id = f"{fact_id}:{kind}:{canonical}"
+            desired_bridge_ids.append(bridge_id)
             cur.execute(
                 """
                 INSERT INTO mneme.fact_entities
@@ -424,19 +606,40 @@ class PostgresRetrievalPlane:
                     scope = EXCLUDED.scope,
                     relation_type = EXCLUDED.relation_type,
                     weight = EXCLUDED.weight
+                WHERE (
+                    mneme.fact_entities.fact_id,
+                    mneme.fact_entities.entity_id,
+                    mneme.fact_entities.scope,
+                    mneme.fact_entities.relation_type,
+                    mneme.fact_entities.weight
+                ) IS DISTINCT FROM (
+                    EXCLUDED.fact_id,
+                    EXCLUDED.entity_id,
+                    EXCLUDED.scope,
+                    EXCLUDED.relation_type,
+                    EXCLUDED.weight
+                )
                 """,
-                (f"{fact_id}:{kind}:{canonical}", fact_id, entity_id, scope, kind),
+                (bridge_id, fact_id, entity_id, scope, kind),
             )
+        cur.execute(
+            """
+            DELETE FROM mneme.fact_entities
+            WHERE fact_id = %s
+              AND NOT (bridge_id = ANY(%s))
+            """,
+            (fact_id, desired_bridge_ids),
+        )
 
     @staticmethod
     def _replace_supersession_edge(cur: Any, fact: Mapping[str, Any]) -> None:
         fact_id = int(fact["fact_id"])
-        cur.execute(
-            "DELETE FROM mneme.memory_edges WHERE edge_id = %s",
-            (f"supersedes:{fact_id}",),
-        )
+        edge_id = f"supersedes:{fact_id}"
         supersedes_id = fact.get("supersedes_id")
         if supersedes_id is None:
+            cur.execute(
+                "DELETE FROM mneme.memory_edges WHERE edge_id = %s", (edge_id,)
+            )
             return
         cur.execute(
             """
@@ -453,9 +656,22 @@ class PostgresRetrievalPlane:
                 scope = EXCLUDED.scope,
                 relation_type = EXCLUDED.relation_type,
                 weight = EXCLUDED.weight
+            WHERE (
+                mneme.memory_edges.src_fact_id,
+                mneme.memory_edges.dst_fact_id,
+                mneme.memory_edges.scope,
+                mneme.memory_edges.relation_type,
+                mneme.memory_edges.weight
+            ) IS DISTINCT FROM (
+                EXCLUDED.src_fact_id,
+                EXCLUDED.dst_fact_id,
+                EXCLUDED.scope,
+                EXCLUDED.relation_type,
+                EXCLUDED.weight
+            )
             """,
             (
-                f"supersedes:{fact_id}",
+                edge_id,
                 fact_id,
                 str(fact.get("scope") or "global"),
                 int(supersedes_id),
@@ -488,6 +704,25 @@ class PostgresRetrievalPlane:
                             source = EXCLUDED.source,
                             evidence = EXCLUDED.evidence,
                             updated_at = EXCLUDED.updated_at
+                        WHERE (
+                            mneme.memory_edges.src_fact_id,
+                            mneme.memory_edges.dst_fact_id,
+                            mneme.memory_edges.scope,
+                            mneme.memory_edges.relation_type,
+                            mneme.memory_edges.weight,
+                            mneme.memory_edges.source,
+                            mneme.memory_edges.evidence,
+                            mneme.memory_edges.updated_at
+                        ) IS DISTINCT FROM (
+                            EXCLUDED.src_fact_id,
+                            EXCLUDED.dst_fact_id,
+                            EXCLUDED.scope,
+                            EXCLUDED.relation_type,
+                            EXCLUDED.weight,
+                            EXCLUDED.source,
+                            EXCLUDED.evidence,
+                            EXCLUDED.updated_at
+                        )
                         """,
                         (
                             f"explicit:{int(relation['relation_id'])}",
@@ -577,16 +812,37 @@ class PostgresRetrievalPlane:
                 fact_count = int(cur.fetchone()[0])
                 cur.execute("SELECT COUNT(*) FROM mneme.memory_edges")
                 edge_count = int(cur.fetchone()[0])
+                try:
+                    cur.execute("SELECT * FROM mneme.graph_health()")
+                    graph_row = cur.fetchone()
+                    graph_health = {
+                        "status": "ok"
+                        if bool(graph_row[2])
+                        and str(graph_row[3]) in {"healthy", "succeeded", "running"}
+                        else "degraded",
+                        "projection_watermark": int(graph_row[0]),
+                        "pending_sync_rows": int(graph_row[1]),
+                        "projection_valid": bool(graph_row[2]),
+                        "maintenance_status": str(graph_row[3]),
+                        "maintenance_message": str(graph_row[4] or ""),
+                    }
+                except Exception as exc:  # noqa: BLE001 - expose health gap
+                    graph_health = {"status": "unavailable", "error": str(exc)}
+        extensions_ok = {"pgcontext", "graph", "pg_cron"}.issubset(extensions)
+        graph_runtime = _graph_runtime_snapshot()
+        graph_health["runtime"] = graph_runtime
+        graph_ok = graph_health["status"] == "ok" and not bool(
+            graph_runtime["circuit_open"]
+        )
         return {
-            "status": "ok"
-            if {"pgcontext", "graph", "pg_cron"}.issubset(extensions)
-            else "degraded",
+            "status": "ok" if extensions_ok and graph_ok else "degraded",
             "host": self.settings.host,
             "port": self.settings.port,
             "database": self.settings.database,
             "facts": fact_count,
             "edges": edge_count,
             "extensions": extensions,
+            "graph": graph_health,
         }
 
 

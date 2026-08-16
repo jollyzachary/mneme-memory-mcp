@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import threading
+import time
+import uuid
 from typing import Literal
 
 from mcp.server.fastmcp import FastMCP
@@ -9,9 +13,83 @@ from mcp.server.fastmcp import FastMCP
 from .bridge import bridge_status
 from .bridge import delegate_to_claude as run_claude
 from .bridge import delegate_to_codex as run_codex
-from .store import SharedMemoryStore, format_facts
+from .store import (
+    POSTGRES_REPAIR_LEASE,
+    SharedMemoryStore,
+    format_facts,
+    wait_for_postgres_repair,
+)
 
 mcp = FastMCP("mneme-memory")
+_LOGGER = logging.getLogger(__name__)
+_BACKGROUND_LOCK = threading.Lock()
+_BACKGROUND_STOP = threading.Event()
+_BACKGROUND_STARTED = False
+_REPAIR_LEASE_TTL_SECONDS = 45.0
+_REPAIR_IDLE_SECONDS = 15.0
+
+
+def _repair_delay_seconds(state: dict[str, float | int], repaired: int) -> float:
+    if int(state["due"]) > 0:
+        return 0.1 if repaired > 0 else 2.0
+    if int(state["total"]) > 0:
+        return max(0.5, min(_REPAIR_IDLE_SECONDS, float(state["next_due_seconds"])))
+    return _REPAIR_IDLE_SECONDS
+
+
+def _background_repair_loop() -> None:
+    memory_store = SharedMemoryStore()
+    owner_id = f"{os.getpid()}:{uuid.uuid4().hex}"
+    generation = 0
+    next_backup_check = 0.0
+    leader_lock = memory_store.acquire_postgres_repair_lock()
+    try:
+        while not _BACKGROUND_STOP.is_set():
+            try:
+                elected = memory_store.claim_maintenance_lease(
+                    name=POSTGRES_REPAIR_LEASE,
+                    owner_id=owner_id,
+                    ttl_seconds=_REPAIR_LEASE_TTL_SECONDS,
+                    force=leader_lock is not None,
+                )
+                if not elected:
+                    generation = wait_for_postgres_repair(
+                        generation, _REPAIR_IDLE_SECONDS
+                    )
+                    continue
+                if time.monotonic() >= next_backup_check:
+                    memory_store.backup_if_due(interval_hours=24.0, keep=30)
+                    next_backup_check = time.monotonic() + 3600.0
+                repaired = memory_store.service_postgres_sync_queue(limit=50)
+                state = memory_store.postgres_sync_queue_state()
+                delay = _repair_delay_seconds(state, repaired)
+            except Exception as exc:  # noqa: BLE001 - survive transient faults
+                _LOGGER.warning("Mneme background mirror repair deferred: %s", exc)
+                delay = _REPAIR_IDLE_SECONDS
+            generation = wait_for_postgres_repair(generation, delay)
+    finally:
+        memory_store.release_postgres_repair_lock(leader_lock)
+        try:
+            memory_store.release_maintenance_lease(
+                name=POSTGRES_REPAIR_LEASE,
+                owner_id=owner_id,
+            )
+        except Exception:  # noqa: BLE001 - lease expires after process death
+            pass
+
+
+def _start_background_repair() -> None:
+    global _BACKGROUND_STARTED
+    with _BACKGROUND_LOCK:
+        if _BACKGROUND_STARTED:
+            return
+        worker = threading.Thread(
+            target=_background_repair_loop,
+            name="mneme-postgres-repair",
+            daemon=True,
+        )
+        worker.start()
+        _BACKGROUND_STARTED = True
 
 
 def store() -> SharedMemoryStore:
@@ -383,6 +461,7 @@ if os.environ.get("MNEME_ENABLE_AGENT_BRIDGE", "0") == "1":
 
 
 def main() -> None:
+    _start_background_repair()
     mcp.run()
 
 

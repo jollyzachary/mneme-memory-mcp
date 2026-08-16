@@ -6,7 +6,7 @@ ARG PG_MAJOR=17
 
 LABEL org.opencontainers.image.title="Mneme PostgreSQL retrieval plane" \
       org.opencontainers.image.description="PostgreSQL 17 with pgContext 0.2.0 and pgGraph 1.0.0" \
-      org.opencontainers.image.licenses="MIT AND PostgreSQL AND Apache-2.0"
+      org.opencontainers.image.licenses="MIT AND Apache-2.0"
 
 RUN apt-get -o Acquire::Retries=3 update \
     && apt-get -o Acquire::Retries=3 install -y --no-install-recommends \

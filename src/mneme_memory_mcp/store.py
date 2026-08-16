@@ -10,12 +10,12 @@ import sqlite3
 import struct
 import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import closing
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import BinaryIO, Literal
 
 from .env_launcher import configure_environment
 from .postgres_retrieval import (
@@ -56,16 +56,70 @@ DEFAULT_EMBED_LOCAL_ONLY = os.environ.get("MNEME_EMBED_LOCAL_ONLY", "1") != "0"
 _embed_model = None
 _embed_model_failed = False
 _embed_fn_override: Callable[[list[str]], list[list[float]]] | None = None
+_EMBED_MODEL_LOCK = threading.Lock()
 _LOGGER = logging.getLogger(__name__)
-_SCHEMA_VERSION = 11
+_SCHEMA_VERSION = 13
 _SCHEMA_LOCK = threading.RLock()
+_POSTGRES_SYNC_LOCK = threading.Lock()
+_POSTGRES_REPAIR_CONDITION = threading.Condition()
+_POSTGRES_REPAIR_GENERATION = 0
+POSTGRES_REPAIR_LEASE = "postgres-mirror-repair"
+_POSTGRES_CIRCUIT_LOCK = threading.Lock()
+_POSTGRES_CIRCUIT_FAILURES = 0
+_POSTGRES_CIRCUIT_OPEN_UNTIL = 0.0
+_POSTGRES_CIRCUIT_LAST_ERROR = ""
+
+
+def _postgres_circuit_snapshot() -> dict[str, object]:
+    with _POSTGRES_CIRCUIT_LOCK:
+        failures = _POSTGRES_CIRCUIT_FAILURES
+        remaining = max(0.0, _POSTGRES_CIRCUIT_OPEN_UNTIL - time.monotonic())
+        last_error = _POSTGRES_CIRCUIT_LAST_ERROR
+    return {
+        "open": remaining > 0,
+        "retry_seconds": round(remaining, 3),
+        "consecutive_failures": failures,
+        "last_error": last_error,
+    }
+
+
+def _record_postgres_success() -> None:
+    global _POSTGRES_CIRCUIT_FAILURES, _POSTGRES_CIRCUIT_OPEN_UNTIL
+    global _POSTGRES_CIRCUIT_LAST_ERROR
+    with _POSTGRES_CIRCUIT_LOCK:
+        _POSTGRES_CIRCUIT_FAILURES = 0
+        _POSTGRES_CIRCUIT_OPEN_UNTIL = 0.0
+        _POSTGRES_CIRCUIT_LAST_ERROR = ""
+
+
+def _record_postgres_failure(exc: Exception) -> None:
+    global _POSTGRES_CIRCUIT_FAILURES, _POSTGRES_CIRCUIT_OPEN_UNTIL
+    global _POSTGRES_CIRCUIT_LAST_ERROR
+    with _POSTGRES_CIRCUIT_LOCK:
+        _POSTGRES_CIRCUIT_FAILURES += 1
+        _POSTGRES_CIRCUIT_OPEN_UNTIL = time.monotonic() + 15.0
+        _POSTGRES_CIRCUIT_LAST_ERROR = str(exc)[:300]
+
+
+def notify_postgres_repair() -> None:
+    global _POSTGRES_REPAIR_GENERATION
+    with _POSTGRES_REPAIR_CONDITION:
+        _POSTGRES_REPAIR_GENERATION += 1
+        _POSTGRES_REPAIR_CONDITION.notify_all()
+
+
+def wait_for_postgres_repair(generation: int, timeout: float) -> int:
+    with _POSTGRES_REPAIR_CONDITION:
+        if _POSTGRES_REPAIR_GENERATION == generation:
+            _POSTGRES_REPAIR_CONDITION.wait(max(0.0, float(timeout)))
+        return _POSTGRES_REPAIR_GENERATION
 
 
 def connect_db(db_path: Path | str) -> sqlite3.Connection:
     """Open a SQLite connection with concurrency-safe defaults.
 
-    Every connection sets busy_timeout and WAL so concurrent local writers wait
-    briefly instead of raising SQLITE_BUSY.
+    Every connection sets busy_timeout and WAL so multi-agent writers
+    (Claude/Codex/Hermes) wait briefly instead of raising SQLITE_BUSY.
     """
 
     conn = sqlite3.connect(str(db_path))
@@ -201,8 +255,8 @@ class Handoff:
 class SharedMemoryStore:
     """Local Markdown + SQLite memory store.
 
-    SQLite is authoritative. USER.md and MEMORY.md are compact generated views
-    for client context.
+    The SQLite event/fact store is the ground truth. USER.md and MEMORY.md are
+    compact generated views for always-loaded context.
     """
 
     def __init__(
@@ -245,6 +299,55 @@ class SharedMemoryStore:
 
     def connect(self) -> sqlite3.Connection:
         return connect_db(self.db_path)
+
+    def backup_if_due(
+        self,
+        *,
+        interval_hours: float = 24.0,
+        keep: int = 30,
+    ) -> Path | None:
+        """Publish and verify an online SQLite snapshot when the interval elapsed."""
+
+        self.ensure()
+        backup_dir = self.home / "backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        _harden_private_path(backup_dir, directory=True)
+        snapshots = sorted(
+            backup_dir.glob("mneme-auto-*.db"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        if snapshots:
+            age_seconds = max(0.0, time.time() - snapshots[0].stat().st_mtime)
+            if age_seconds < max(1.0, float(interval_hours)) * 3600.0:
+                return None
+
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        destination = backup_dir / f"mneme-auto-{stamp}.db"
+        temporary = backup_dir / f".{destination.name}.{os.getpid()}.tmp"
+        try:
+            with closing(self.connect()) as source, closing(
+                sqlite3.connect(str(temporary))
+            ) as target:
+                source.backup(target)
+                target.commit()
+                integrity = str(target.execute("PRAGMA integrity_check").fetchone()[0])
+                if integrity != "ok":
+                    raise RuntimeError(f"backup integrity check failed: {integrity}")
+            temporary.replace(destination)
+            _harden_private_path(destination)
+        finally:
+            if temporary.exists():
+                temporary.unlink()
+
+        retained = sorted(
+            backup_dir.glob("mneme-auto-*.db"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        for obsolete in retained[max(1, int(keep)) :]:
+            obsolete.unlink()
+        return destination
 
     def capture_offset(self, *, source: str, path: Path) -> int:
         """Return the next safe JSONL byte offset, resetting on file replacement."""
@@ -455,8 +558,10 @@ class SharedMemoryStore:
                 entry_id = int(row["entry_id"])
                 is_new = False
             conn.commit()
-        # Create an event only for a new episodic entry. Duplicate capture must
-        # not grow the event log.
+        # Only log an event for genuinely NEW snippets. Re-capturing the same
+        # transcript (every session-end hook) used to insert a fresh episodic.add
+        # event per already-deduped snippet — 1000 entries had grown 787k events
+        # (~270MB). The event is provenance for a real insert, nothing more.
         if is_new:
             event_id = self._insert_event(
                 event_type="episodic.add",
@@ -553,15 +658,16 @@ class SharedMemoryStore:
             conn.commit()
         return before - after
 
-    # Bound high-volume event types while retaining handoff and migration events.
+    # High-volume, low-value event types that accrue one row per write and must
+    # stay bounded. handoff.write / migration.* are rare and durable — never pruned.
     _PRUNABLE_EVENT_TYPES = ("episodic.add", "fact.add", "memory.retrieved")
 
     def prune_events(self, *, max_age_days: int = 30, keep_recent: int = 20000) -> int:
-        """Bound high-volume audit events while retaining handoff and migration events.
-
-        Pruning old ``fact.add`` events removes only the event-to-fact provenance
-        link; facts remain intact.
-        """
+        """Bound the audit log. handoff.write and migration events are rare, durable
+        provenance and kept forever; the high-volume per-write events (episodic.add,
+        fact.add) are pruned by age past a hard recency cap so the events table can't
+        balloon again. Pruning old fact.add rows drops the event→fact provenance link
+        for old facts only; the facts themselves are untouched."""
 
         self.ensure()
         with closing(self.connect()) as conn:
@@ -636,7 +742,8 @@ class SharedMemoryStore:
         return before - after
 
     def maybe_vacuum(self, *, min_free_fraction: float = 0.25) -> bool:
-        """Reclaim file space after pruning frees enough database pages."""
+        """Reclaim file space once pruning has freed a meaningful fraction of pages.
+        The DB once grew to 275MB of dead weight; this keeps prune wins on disk."""
 
         self.ensure()
         with closing(self.connect()) as conn:
@@ -751,20 +858,21 @@ class SharedMemoryStore:
     ) -> tuple[dict[int, float], bool]:
         if not postgres_retrieval_enabled():
             return {}, False
-        self._flush_postgres_sync_queue(limit=25)
+        if not postgres_required() and bool(_postgres_circuit_snapshot()["open"]):
+            return {}, False
         query_vectors = _embed_texts([query])
         query_vector = query_vectors[0] if query_vectors else None
         try:
-            return (
-                PostgresRetrievalPlane().search(
-                    query=query,
-                    scopes=scopes,
-                    limit=candidate_limit,
-                    query_vector=query_vector,
-                ),
-                True,
+            scores = PostgresRetrievalPlane().search(
+                query=query,
+                scopes=scopes,
+                limit=candidate_limit,
+                query_vector=query_vector,
             )
+            _record_postgres_success()
+            return scores, True
         except Exception as exc:  # noqa: BLE001 - derived retrieval must fail closed
+            _record_postgres_failure(exc)
             if postgres_required():
                 raise
             _LOGGER.warning(
@@ -1049,6 +1157,28 @@ class SharedMemoryStore:
             pending_postgres_sync = int(
                 conn.execute("SELECT COUNT(*) FROM postgres_sync_queue").fetchone()[0]
             )
+            retrying_postgres_sync = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM postgres_sync_queue WHERE attempts > 0"
+                ).fetchone()[0]
+            )
+            retry_row = conn.execute(
+                """
+                SELECT
+                    COUNT(*) AS total,
+                    COALESCE(SUM(next_attempt_at <= CURRENT_TIMESTAMP), 0) AS due,
+                    COALESCE(MAX(attempts), 0) AS max_attempts
+                FROM postgres_sync_queue
+                """
+            ).fetchone()
+            lease_row = conn.execute(
+                """
+                SELECT owner_id, expires_at
+                FROM maintenance_leases
+                WHERE name = ?
+                """,
+                (POSTGRES_REPAIR_LEASE,),
+            ).fetchone()
             capture_checkpoints = int(
                 conn.execute("SELECT COUNT(*) FROM capture_checkpoints").fetchone()[0]
             )
@@ -1082,8 +1212,16 @@ class SharedMemoryStore:
             if importlib.util.find_spec("sentence_transformers") is not None
             else "unavailable"
         )
+        lease_active = bool(
+            lease_row is not None and float(lease_row["expires_at"]) > time.time()
+        )
         report: dict[str, object] = {
-            "status": "ok" if integrity == "ok" and journal == "wal" else "degraded",
+            "status": "ok"
+            if integrity == "ok"
+            and journal == "wal"
+            and retrying_postgres_sync == 0
+            and (pending_postgres_sync == 0 or lease_active)
+            else "degraded",
             "integrity": integrity,
             "journal_mode": journal,
             "schema_version": schema_version,
@@ -1099,6 +1237,22 @@ class SharedMemoryStore:
             "handoffs": handoffs,
             "relations": relations,
             "pending_postgres_sync": pending_postgres_sync,
+            "retrying_postgres_sync": retrying_postgres_sync,
+            "postgres_repair": {
+                "leader_active": lease_active,
+                "lease_expires_seconds": round(
+                    max(
+                        0.0,
+                        float(lease_row["expires_at"]) - time.time()
+                        if lease_row is not None
+                        else 0.0,
+                    ),
+                    3,
+                ),
+                "queued": int(retry_row["total"] or 0),
+                "due": int(retry_row["due"] or 0),
+                "max_attempts": int(retry_row["max_attempts"] or 0),
+            },
             "capture_checkpoints": capture_checkpoints,
             "embedding_eligible_facts": embedding_eligible,
             "embedded_facts": embedded,
@@ -1108,11 +1262,17 @@ class SharedMemoryStore:
         }
         if postgres_retrieval_enabled():
             try:
-                report["postgres"] = PostgresRetrievalPlane().health()
+                postgres_health = PostgresRetrievalPlane().health()
+                report["postgres"] = postgres_health
+                if postgres_health.get("status") != "ok":
+                    report["status"] = "degraded"
+                else:
+                    _record_postgres_success()
             except Exception as exc:  # noqa: BLE001 - health must report, not crash
                 report["postgres"] = {"status": "unavailable", "reason": str(exc)}
-                if postgres_required():
-                    report["status"] = "degraded"
+                report["status"] = "degraded"
+                _record_postgres_failure(exc)
+        report["postgres_availability"] = _postgres_circuit_snapshot()
         return report
 
     def maintain(
@@ -1543,10 +1703,13 @@ class SharedMemoryStore:
         return _row_to_handoff(row) if row else None
 
     def consolidate(self, *, user_limit: int = 12, memory_limit: int = 24) -> None:
-        """Regenerate bounded USER.md and MEMORY.md working-set views.
+        """Regenerate small USER.md and MEMORY.md working-set views.
 
-        Generated views use trusted curated facts. Capture-derived candidates
-        remain in the database and require explicit candidate retrieval or review.
+        The always-loaded views are built from *curated* facts (manual writes and
+        handoffs), queried directly so an important-but-older fact is never pushed
+        out of the window by a flood of recent capture entries. Capture-distilled
+        facts stay in the DB and remain searchable — they just don't pollute the
+        always-on context.
         """
 
         self.ensure()
@@ -1572,11 +1735,11 @@ class SharedMemoryStore:
     def _working_set_facts(
         self, *, user: bool, limit: int, scope: MemoryScope = "project"
     ) -> list[Fact]:
-        """Curated facts for a generated working set, ranked and deduplicated.
+        """Curated facts for an always-loaded view, newest first and deduped.
 
         USER.md draws identity/preferences (`user_pref`); MEMORY.md draws project
-        knowledge. Both exclude `source='capture'`; candidate-inclusive search and
-        review remain available separately.
+        knowledge. Both exclude `source='capture'` so the always-on context stays
+        clean — capture stays reachable through `search`.
         """
 
         if user:
@@ -1604,10 +1767,8 @@ class SharedMemoryStore:
         return _dedupe_by_content(facts)[: max(1, limit)]
 
     def repair_corrupted_content(self) -> int:
-        """Normalize existing facts and remove protocol markup.
-
-        Returns the number of rows changed.
-        """
+        """One-time cleanup: re-normalize every fact so previously-stored tool-call
+        markup is stripped. Returns the number of rows changed."""
 
         self.ensure()
         changed = 0
@@ -1623,8 +1784,7 @@ class SharedMemoryStore:
                         )
                         changed += 1
                     except sqlite3.IntegrityError:
-                        # Cleaning produced a duplicate of an existing fact, so
-                        # this redundant row can be removed.
+                        # Cleaning produced a duplicate of an existing fact — drop this one.
                         conn.execute(
                             "DELETE FROM facts WHERE fact_id = ?", (row["fact_id"],)
                         )
@@ -1656,11 +1816,12 @@ class SharedMemoryStore:
         self.ensure()
         return self._get_fact(fact_id)
 
-    def _sync_fact_family(self, fact_id: int) -> None:
+    def _sync_fact_family(self, fact_id: int) -> bool:
         if not postgres_retrieval_enabled():
-            return
+            return True
         try:
             with closing(self.connect()) as conn:
+                conn.execute("BEGIN")
                 rows = conn.execute(
                     """
                     SELECT f.*, e.model AS embedding_model,
@@ -1672,6 +1833,10 @@ class SharedMemoryStore:
                     """,
                     (fact_id, fact_id),
                 ).fetchall()
+                row_ids = [int(row["fact_id"]) for row in rows]
+                revisions = self._postgres_sync_revisions(
+                    conn, "fact", row_ids
+                )
             mirrors: list[dict[str, object]] = []
             embeddings: dict[int, Sequence[float]] = {}
             for row in rows:
@@ -1682,98 +1847,284 @@ class SharedMemoryStore:
                     embeddings[row_id] = _unpack_embedding(blob)
                 mirrors.append(mirror)
             PostgresRetrievalPlane().upsert_facts(mirrors, embeddings)
-            self._clear_postgres_sync_items(
-                "fact", [int(mirror["fact_id"]) for mirror in mirrors]
-            )
+            self._clear_postgres_sync_items("fact", revisions)
+            return True
         except Exception as exc:  # noqa: BLE001 - SQLite write is already durable
-            if postgres_required():
-                raise
             _LOGGER.warning("could not mirror fact %s to PostgreSQL: %s", fact_id, exc)
+            return False
 
-    def _sync_relation(self, relation_id: int) -> None:
+    def _sync_relation(self, relation_id: int) -> bool:
         if not postgres_retrieval_enabled():
-            return
+            return True
         try:
             with closing(self.connect()) as conn:
+                conn.execute("BEGIN")
                 row = conn.execute(
                     "SELECT * FROM fact_relations WHERE relation_id = ?",
                     (relation_id,),
                 ).fetchone()
+                revisions = self._postgres_sync_revisions(
+                    conn, "relation", [relation_id]
+                )
             if row is not None:
                 PostgresRetrievalPlane().upsert_relations([dict(row)])
-                self._clear_postgres_sync_items("relation", [relation_id])
+                self._clear_postgres_sync_items("relation", revisions)
+            return True
         except Exception as exc:  # noqa: BLE001 - SQLite relation is already durable
-            if postgres_required():
-                raise
             _LOGGER.warning(
                 "could not mirror relation %s to PostgreSQL: %s", relation_id, exc
             )
+            return False
 
-    def _delete_postgres_fact(self, fact_id: int) -> None:
+    def _delete_postgres_fact(self, fact_id: int) -> bool:
         if not postgres_retrieval_enabled():
-            return
+            return True
         try:
+            with closing(self.connect()) as conn:
+                revisions = self._postgres_sync_revisions(conn, "fact", [fact_id])
             PostgresRetrievalPlane().delete_fact(fact_id)
-            self._clear_postgres_sync_items("fact", [fact_id])
+            self._clear_postgres_sync_items("fact", revisions)
+            return True
         except Exception as exc:  # noqa: BLE001 - SQLite remains authoritative
-            if postgres_required():
-                raise
             _LOGGER.warning("could not remove fact %s from PostgreSQL: %s", fact_id, exc)
+            return False
 
-    def _delete_postgres_relation(self, relation_id: int) -> None:
+    def _delete_postgres_relation(self, relation_id: int) -> bool:
         if not postgres_retrieval_enabled():
-            return
+            return True
         try:
+            with closing(self.connect()) as conn:
+                revisions = self._postgres_sync_revisions(
+                    conn, "relation", [relation_id]
+                )
             PostgresRetrievalPlane().delete_relation(relation_id)
-            self._clear_postgres_sync_items("relation", [relation_id])
+            self._clear_postgres_sync_items("relation", revisions)
+            return True
         except Exception as exc:  # noqa: BLE001 - SQLite remains authoritative
-            if postgres_required():
-                raise
             _LOGGER.warning(
                 "could not remove relation %s from PostgreSQL: %s", relation_id, exc
             )
+            return False
+
+    @staticmethod
+    def _postgres_sync_revisions(
+        conn: sqlite3.Connection, item_type: str, item_ids: Sequence[int]
+    ) -> dict[int, int]:
+        if not item_ids:
+            return {}
+        rows = conn.execute(
+            f"""
+            SELECT item_id, revision
+            FROM postgres_sync_queue
+            WHERE item_type = ?
+              AND item_id IN ({','.join('?' for _ in item_ids)})
+            """,
+            (item_type, *[int(item_id) for item_id in item_ids]),
+        ).fetchall()
+        return {int(row["item_id"]): int(row["revision"]) for row in rows}
 
     def _clear_postgres_sync_items(
-        self, item_type: str, item_ids: Sequence[int]
+        self, item_type: str, revisions: Mapping[int, int]
     ) -> None:
-        if not item_ids:
+        if not revisions:
             return
         with closing(self.connect()) as conn:
-            conn.execute(
-                f"""
+            conn.executemany(
+                """
                 DELETE FROM postgres_sync_queue
-                WHERE item_type = ?
-                  AND item_id IN ({','.join('?' for _ in item_ids)})
+                WHERE item_type = ? AND item_id = ? AND revision = ?
                 """,
-                (item_type, *[int(item_id) for item_id in item_ids]),
+                [
+                    (item_type, int(item_id), int(revision))
+                    for item_id, revision in revisions.items()
+                ],
             )
             conn.commit()
 
-    def _flush_postgres_sync_queue(self, *, limit: int = 25) -> None:
+    def service_postgres_sync_queue(self, *, limit: int = 25) -> int:
+        """Repair the derived PostgreSQL mirror outside the chat request path."""
+
         if not postgres_retrieval_enabled():
+            return 0
+        self.ensure()
+        if not _POSTGRES_SYNC_LOCK.acquire(blocking=False):
+            return 0
+        try:
+            return self._flush_postgres_sync_queue(limit=limit)
+        finally:
+            _POSTGRES_SYNC_LOCK.release()
+
+    def postgres_sync_queue_state(self) -> dict[str, float | int]:
+        """Return enough queue timing state for an adaptive repair scheduler."""
+
+        self.ensure()
+        with closing(self.connect()) as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    COUNT(*) AS total,
+                    COALESCE(SUM(next_attempt_at <= CURRENT_TIMESTAMP), 0) AS due,
+                    COALESCE(MAX(attempts), 0) AS max_attempts,
+                    MIN(
+                        MAX(
+                            0.0,
+                            (julianday(next_attempt_at) - julianday('now')) * 86400.0
+                        )
+                    ) AS next_due_seconds
+                FROM postgres_sync_queue
+                """
+            ).fetchone()
+        return {
+            "total": int(row["total"] or 0),
+            "due": int(row["due"] or 0),
+            "max_attempts": int(row["max_attempts"] or 0),
+            "next_due_seconds": float(row["next_due_seconds"] or 0.0),
+        }
+
+    def claim_maintenance_lease(
+        self,
+        *,
+        name: str,
+        owner_id: str,
+        ttl_seconds: float = 45.0,
+        force: bool = False,
+    ) -> bool:
+        """Elect one crash-expiring maintenance worker across agent processes."""
+
+        self.ensure()
+        now = time.time()
+        with closing(self.connect()) as conn:
+            current = conn.execute(
+                "SELECT owner_id, expires_at FROM maintenance_leases WHERE name = ?",
+                (name,),
+            ).fetchone()
+            if (
+                not force
+                and current is not None
+                and str(current["owner_id"]) != owner_id
+                and float(current["expires_at"]) > now
+            ):
+                return False
+            conn.execute("BEGIN IMMEDIATE")
+            current = conn.execute(
+                "SELECT owner_id, expires_at FROM maintenance_leases WHERE name = ?",
+                (name,),
+            ).fetchone()
+            if (
+                not force
+                and current is not None
+                and str(current["owner_id"]) != owner_id
+                and float(current["expires_at"]) > now
+            ):
+                conn.rollback()
+                return False
+            conn.execute(
+                """
+                INSERT INTO maintenance_leases
+                    (name, owner_id, acquired_at, heartbeat_at, expires_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(name) DO UPDATE SET
+                    owner_id = excluded.owner_id,
+                    acquired_at = CASE
+                        WHEN maintenance_leases.owner_id = excluded.owner_id
+                        THEN maintenance_leases.acquired_at
+                        ELSE excluded.acquired_at
+                    END,
+                    heartbeat_at = excluded.heartbeat_at,
+                    expires_at = excluded.expires_at
+                """,
+                (name, owner_id, now, now, now + max(10.0, ttl_seconds)),
+            )
+            conn.commit()
+        return True
+
+    def acquire_postgres_repair_lock(self) -> BinaryIO | None:
+        """Block without polling until this process becomes the POSIX repair leader."""
+
+        if os.name == "nt":
+            return None
+        import fcntl
+
+        self.home.mkdir(parents=True, exist_ok=True)
+        lock_path = self.home / ".postgres-repair.lock"
+        handle = lock_path.open("a+b")
+        _harden_private_path(lock_path)
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        return handle
+
+    @staticmethod
+    def release_postgres_repair_lock(handle: BinaryIO | None) -> None:
+        if handle is None:
             return
+        import fcntl
+
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
+
+    def release_maintenance_lease(self, *, name: str, owner_id: str) -> None:
+        self.ensure()
+        with closing(self.connect()) as conn:
+            conn.execute(
+                "DELETE FROM maintenance_leases WHERE name = ? AND owner_id = ?",
+                (name, owner_id),
+            )
+            conn.commit()
+
+    def _flush_postgres_sync_queue(self, *, limit: int = 25) -> int:
+        if not postgres_retrieval_enabled():
+            return 0
         with closing(self.connect()) as conn:
             rows = conn.execute(
                 """
-                SELECT item_type, item_id, operation
+                SELECT item_type, item_id, operation, attempts, revision
                 FROM postgres_sync_queue
+                WHERE next_attempt_at <= CURRENT_TIMESTAMP
                 ORDER BY enqueued_at, item_type, item_id
                 LIMIT ?
                 """,
                 (_bounded_limit(limit, upper=100),),
             ).fetchall()
+        repaired = 0
         for row in rows:
             item_type = str(row["item_type"])
             item_id = int(row["item_id"])
             operation = str(row["operation"])
+            revision = int(row["revision"])
+            success = False
             if item_type == "fact" and operation == "delete":
-                self._delete_postgres_fact(item_id)
+                success = self._delete_postgres_fact(item_id)
             elif item_type == "fact":
-                self._sync_fact_family(item_id)
+                success = self._sync_fact_family(item_id)
             elif item_type == "relation" and operation == "delete":
-                self._delete_postgres_relation(item_id)
+                success = self._delete_postgres_relation(item_id)
             elif item_type == "relation":
-                self._sync_relation(item_id)
+                success = self._sync_relation(item_id)
+            if success:
+                repaired += 1
+                continue
+            attempts = int(row["attempts"] or 0) + 1
+            delay_seconds = min(300, 2 ** min(attempts, 8))
+            with closing(self.connect()) as conn:
+                conn.execute(
+                    """
+                    UPDATE postgres_sync_queue
+                    SET attempts = ?,
+                        next_attempt_at = datetime('now', ?),
+                        last_error = 'PostgreSQL mirror retry failed'
+                    WHERE item_type = ? AND item_id = ? AND revision = ?
+                    """,
+                    (
+                        attempts,
+                        f"+{delay_seconds} seconds",
+                        item_type,
+                        item_id,
+                        revision,
+                    ),
+                )
+                conn.commit()
+        return repaired
 
     def _insert_fact(
         self,
@@ -1812,9 +2163,11 @@ class SharedMemoryStore:
                     else:
                         superseded_by = current.fact_id
             else:
-                # Supersede keyless near-duplicates at write time. Use the
-                # generated-view marker as a candidate filter, then confirm with
-                # bounded similarity scoring.
+                # Keyless near-duplicates used to pile up and only got hidden at
+                # view time; supersede them at write time instead so the newest
+                # restatement is the single current fact.
+                # ponytail: first-8-significant-words marker (same as the view
+                # dedupe); upgrade to similarity scoring if false merges show up.
                 marker = _content_marker(content)
                 candidates = conn.execute(
                     """
@@ -2022,7 +2375,19 @@ CREATE TABLE IF NOT EXISTS postgres_sync_queue (
     item_id INTEGER NOT NULL,
     operation TEXT NOT NULL CHECK (operation IN ('upsert', 'delete')),
     enqueued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_error TEXT NOT NULL DEFAULT '',
+    revision INTEGER NOT NULL DEFAULT 1,
     PRIMARY KEY (item_type, item_id)
+);
+
+CREATE TABLE IF NOT EXISTS maintenance_leases (
+    name TEXT PRIMARY KEY,
+    owner_id TEXT NOT NULL,
+    acquired_at REAL NOT NULL,
+    heartbeat_at REAL NOT NULL,
+    expires_at REAL NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -2150,6 +2515,30 @@ def _migrate(conn: sqlite3.Connection) -> None:
     for name, ddl in additions.items():
         if name not in columns:
             conn.execute(f"ALTER TABLE facts ADD COLUMN {name} {ddl}")
+    if prior_version < 12:
+        queue_columns = {
+            row["name"]
+            for row in conn.execute(
+                "PRAGMA table_info(postgres_sync_queue)"
+            ).fetchall()
+        }
+        queue_additions = {
+            "attempts": "INTEGER NOT NULL DEFAULT 0",
+            "next_attempt_at": "TIMESTAMP",
+            "last_error": "TEXT NOT NULL DEFAULT ''",
+            "revision": "INTEGER NOT NULL DEFAULT 1",
+        }
+        for name, ddl in queue_additions.items():
+            if name not in queue_columns:
+                conn.execute(
+                    f"ALTER TABLE postgres_sync_queue ADD COLUMN {name} {ddl}"
+                )
+        conn.execute(
+            """
+            UPDATE postgres_sync_queue
+            SET next_attempt_at = COALESCE(next_attempt_at, CURRENT_TIMESTAMP)
+            """
+        )
     if "importance" not in columns:
         conn.execute("UPDATE facts SET importance = MAX(0.0, MIN(1.0, trust_score))")
     if "state" not in columns:
@@ -2237,7 +2626,7 @@ def _row_to_fact(row: sqlite3.Row) -> Fact:
 
 
 def _quarantine_unsafe_existing(conn: sqlite3.Connection) -> None:
-    """Quarantine unsafe facts written by earlier schema versions."""
+    """One-time v9 safety pass over legacy durable facts."""
 
     rows = conn.execute(
         """
@@ -2308,20 +2697,25 @@ def _get_embed_model():
         return None
     if _embed_model is not None:
         return _embed_model
-    try:
-        _quiet_embedding_runtime()
-        from sentence_transformers import SentenceTransformer  # type: ignore
+    with _EMBED_MODEL_LOCK:
+        if _embed_model_failed:
+            return None
+        if _embed_model is not None:
+            return _embed_model
+        try:
+            _quiet_embedding_runtime()
+            from sentence_transformers import SentenceTransformer  # type: ignore
 
-        _embed_model = SentenceTransformer(
-            DEFAULT_EMBED_MODEL,
-            revision=DEFAULT_EMBED_MODEL_REVISION,
-            local_files_only=DEFAULT_EMBED_LOCAL_ONLY,
-        )
-        return _embed_model
-    except Exception as exc:  # noqa: BLE001 - optional backend can raise provider-specific errors
-        _LOGGER.debug("local embedding model unavailable: %s", exc)
-        _embed_model_failed = True
-        return None
+            _embed_model = SentenceTransformer(
+                DEFAULT_EMBED_MODEL,
+                revision=DEFAULT_EMBED_MODEL_REVISION,
+                local_files_only=DEFAULT_EMBED_LOCAL_ONLY,
+            )
+            return _embed_model
+        except Exception as exc:  # noqa: BLE001 - provider-specific failures
+            _LOGGER.debug("local embedding model unavailable: %s", exc)
+            _embed_model_failed = True
+            return None
 
 
 def _prepare_embed_model() -> bool:
@@ -2629,8 +3023,10 @@ def _row_to_handoff(row: sqlite3.Row) -> Handoff:
     )
 
 
-# Strip malformed MCP tool-call markup at the write boundary so protocol
-# scaffolding cannot enter durable memory.
+# A buggy MCP client occasionally serializes a tool call so that the next
+# parameter's opening markup bleeds into `content` (e.g. it ends with
+# `</content> <parameter name="category">project`). The store is ground truth,
+# so it must never persist tool-call scaffolding — strip it at the boundary.
 _TOOL_MARKUP_RE = re.compile(
     r"</?content>\s*<parameter\b.*$", re.IGNORECASE | re.DOTALL
 )
@@ -2649,9 +3045,11 @@ def _normalize_content(content: str | None) -> str:
     return re.sub(r"\s+", " ", _strip_tool_markup(content or "")).strip()
 
 
-# --- Durable-write validation ---------------------------------------------------------
-# Reject oversized or secret-like content. Quarantine suspected prompt injection
-# in agent-private scope so it remains reviewable without entering normal recall.
+# --- Security: agent-authored writes are untrusted until validated -------------------
+# A durable memory is only as trustworthy as its writer. Oversized content is rejected;
+# content that reads like a prompt-injection / poisoning payload is quarantined — forced
+# to agent-private scope, trust floored, and tagged — so it can never surface in a shared
+# read or the always-on working set, while staying in the store for audit.
 MAX_FACT_CHARS = 20_000
 
 _INJECTION_PATTERNS = tuple(
@@ -2697,15 +3095,12 @@ def _screen_fact_write(
     tags: str,
     state: str,
 ) -> tuple[str, float, str, str]:
-    """Validate a durable write and return its governed metadata.
-
-    Oversized and secret-like content is rejected. Suspected prompt injection is
-    quarantined with restricted scope and trust.
-    """
+    """Untrusted-until-validated gate for a durable write. Rejects oversized content and
+    secret-like content, and quarantines suspected injection/poisoning. Returns
+    the (possibly adjusted) scope, trust, tags, and lifecycle state."""
     if len(content) > MAX_FACT_CHARS:
         raise ValueError(
-            f"fact content too long ({len(content)} chars; max {MAX_FACT_CHARS}); "
-            "refusing durable write"
+            f"fact content too long ({len(content)} chars; max {MAX_FACT_CHARS}) — refusing durable write"
         )
     if _looks_like_secret(content):
         raise ValueError("secret-like content is not allowed in durable memory")
@@ -2769,14 +3164,20 @@ def _queue_postgres_sync(
     conn.execute(
         """
         INSERT INTO postgres_sync_queue
-            (item_type, item_id, operation, enqueued_at)
-        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            (item_type, item_id, operation, enqueued_at, attempts,
+             next_attempt_at, last_error)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP, 0, CURRENT_TIMESTAMP, '')
         ON CONFLICT(item_type, item_id) DO UPDATE SET
             operation = excluded.operation,
-            enqueued_at = CURRENT_TIMESTAMP
+            enqueued_at = CURRENT_TIMESTAMP,
+            attempts = 0,
+            next_attempt_at = CURRENT_TIMESTAMP,
+            last_error = '',
+            revision = postgres_sync_queue.revision + 1
         """,
         (item_type, int(item_id), operation),
     )
+    notify_postgres_repair()
 
 
 def _bounded_limit(limit: int, upper: int) -> int:
@@ -2981,7 +3382,7 @@ def _near_duplicate(left: str, right: str) -> bool:
 
 def _dedupe_by_content(facts: list[Fact]) -> list[Fact]:
     """Collapse near-duplicates so keyless facts that restate the same thing don't
-    both reach a generated view. Keyed facts dedupe by key; the rest by their
+    both reach the always-on view. Keyed facts dedupe by key; the rest by their
     first 8 significant words (input order is preserved)."""
 
     seen: set[str] = set()
@@ -3011,8 +3412,9 @@ def _visible_scopes(scope: str) -> tuple[str, ...]:
 
 
 def _fact_rank_key(fact: Fact) -> tuple[int, float, tuple[int, ...], int]:
-    # Curated facts outrank capture-derived candidates while explicit candidate
-    # retrieval remains available.
+    # Curated facts (manual/handoff) outrank auto-distilled capture so a search
+    # surfaces real knowledge before transcript noise — capture stays reachable,
+    # just never floods the top of the result set.
     curated = 0 if fact.source == "capture" else 1
     return (curated, fact.trust_score, _parse_version(fact.version), fact.fact_id)
 
@@ -3217,7 +3619,8 @@ def _short_hash(text: str) -> str:
 
 
 def _strip_preamble(text: str) -> str:
-    """Remove request framing so the stored value is the fact itself."""
+    """Verbalizable-bottleneck cleanup: drop 'remember that...' style framing so the
+    stored fact is the fact itself."""
     text = re.sub(r"(?i)^(please\s+)?remember\s+(that\s+)?", "", text)
     return re.sub(r"(?i)^(note\s+that|important:)\s*", "", text)
 
@@ -3230,3 +3633,7 @@ def _truncate(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 16)].rstrip() + " ... [truncated]"
+
+
+# TODO(mneme): add optional embedding and temporal/entity graph indexes beside FTS5.
+# Keep FTS as the default exact-symbol path; merge/dedupe semantic/graph hits here.

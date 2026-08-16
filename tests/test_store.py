@@ -457,6 +457,26 @@ class SharedMemoryStoreTest(unittest.TestCase):
         finally:
             store_mod.set_embed_fn(None)
 
+    def test_online_backup_is_verified_and_interval_bounded(self) -> None:
+        store = self.make_store()
+        fact_id = store.add_fact("Backup recovery sentinel.", source="manual")
+
+        snapshot = store.backup_if_due(interval_hours=24, keep=3)
+
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(snapshot.stat().st_mode & 0o777, 0o600)
+        with connect(snapshot) as restored:
+            self.assertEqual(
+                restored.execute("PRAGMA integrity_check").fetchone()[0], "ok"
+            )
+            self.assertEqual(
+                restored.execute(
+                    "SELECT content FROM facts WHERE fact_id = ?", (fact_id,)
+                ).fetchone()[0],
+                "Backup recovery sentinel.",
+            )
+        self.assertIsNone(store.backup_if_due(interval_hours=24, keep=3))
+
 
 if __name__ == "__main__":
     unittest.main()

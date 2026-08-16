@@ -20,6 +20,15 @@ CREATE EXTENSION IF NOT EXISTS pg_cron;
 CREATE EXTENSION IF NOT EXISTS graph;
 CREATE EXTENSION IF NOT EXISTS pgcontext;
 
+-- pgGraph's default 256 MB maintenance workspace is too small for Mneme's
+-- full local projection. This remains below the extension's 2 GB hard limit
+-- and affects maintenance only, not query memory.
+SELECT format(
+    'ALTER DATABASE %I SET graph.maintenance_memory_mb = 1024',
+    current_database()
+)
+\gexec
+
 DO $roles$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mneme_runtime') THEN
@@ -204,21 +213,71 @@ SELECT * FROM graph.build();
 
 SELECT cron.schedule(
     'mneme-pggraph-maintenance',
-    '*/5 * * * *',
+    '* * * * *',
     $$SELECT * FROM graph.run_scheduled_maintenance();$$
 )
 WHERE NOT EXISTS (
     SELECT 1 FROM cron.job WHERE jobname = 'mneme-pggraph-maintenance'
 );
 
-SELECT cron.schedule(
-    'mneme-pggraph-sync',
-    '* * * * *',
-    $$SELECT * FROM graph.apply_sync();$$
+CREATE OR REPLACE FUNCTION mneme.graph_health()
+RETURNS TABLE (
+    projection_watermark BIGINT,
+    pending_sync_rows BIGINT,
+    projection_valid BOOLEAN,
+    maintenance_status TEXT,
+    maintenance_message TEXT
 )
-WHERE NOT EXISTS (
-    SELECT 1 FROM cron.job WHERE jobname = 'mneme-pggraph-sync'
-);
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = pg_catalog, graph, cron
+AS $function$
+    WITH projection AS (
+        SELECT
+            COALESCE((
+                SELECT sync_watermark
+                FROM graph._projection_generations
+                WHERE validation_status = 'valid'
+                ORDER BY is_current DESC, generation_id DESC
+                LIMIT 1
+            ), 0)::BIGINT AS watermark,
+            EXISTS (
+                SELECT 1 FROM graph._projection_generations
+                WHERE validation_status = 'valid'
+            ) AS valid
+    ), latest_run AS (
+        SELECT d.status, d.return_message
+        FROM cron.job_run_details AS d
+        JOIN cron.job AS j ON j.jobid = d.jobid
+        WHERE j.jobname = 'mneme-pggraph-maintenance'
+        ORDER BY d.runid DESC
+        LIMIT 1
+    )
+    ), current_state AS (
+        SELECT
+            p.watermark,
+            p.valid,
+            (SELECT COUNT(*) FROM graph._sync_log WHERE id > p.watermark) AS pending
+        FROM projection AS p
+    )
+    SELECT
+        s.watermark,
+        s.pending,
+        s.valid,
+        CASE
+            WHEN s.valid AND s.pending = 0 THEN 'healthy'
+            ELSE COALESCE(r.status, 'missing')
+        END,
+        CASE
+            WHEN s.valid AND s.pending = 0 THEN 'projection current'
+            ELSE COALESCE(r.return_message, '')
+        END
+    FROM current_state AS s
+    LEFT JOIN latest_run AS r ON true
+$function$;
+
+REVOKE ALL ON FUNCTION mneme.graph_health() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION mneme.graph_health() TO mneme_runtime;
 
 GRANT CONNECT ON DATABASE mneme TO mneme_runtime;
 GRANT USAGE ON SCHEMA mneme, pgcontext, graph TO mneme_runtime;
