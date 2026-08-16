@@ -76,9 +76,9 @@ def postgres_required() -> bool:
 class PostgresRetrievalPlane:
     """Derived pgContext + pgGraph retrieval plane for Mneme.
 
-    SQLite remains the governed journal during the first cutover stage. This
-    class mirrors facts into PostgreSQL, retrieves candidate ids, and returns
-    those ids to the existing SQLite trust/supersession ranker.
+    SQLite remains the authoritative journal. This class mirrors facts into
+    PostgreSQL, retrieves candidate ids, and returns those ids to the SQLite
+    trust and supersession ranker.
     """
 
     def __init__(self, settings: PostgresSettings | None = None) -> None:

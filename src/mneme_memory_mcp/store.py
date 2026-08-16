@@ -1623,7 +1623,8 @@ class SharedMemoryStore:
                         )
                         changed += 1
                     except sqlite3.IntegrityError:
-                        # Cleaning produced a duplicate of an existing fact — drop this one.
+                        # Cleaning produced a duplicate of an existing fact, so
+                        # this redundant row can be removed.
                         conn.execute(
                             "DELETE FROM facts WHERE fact_id = ?", (row["fact_id"],)
                         )
@@ -2703,7 +2704,8 @@ def _screen_fact_write(
     """
     if len(content) > MAX_FACT_CHARS:
         raise ValueError(
-            f"fact content too long ({len(content)} chars; max {MAX_FACT_CHARS}) — refusing durable write"
+            f"fact content too long ({len(content)} chars; max {MAX_FACT_CHARS}); "
+            "refusing durable write"
         )
     if _looks_like_secret(content):
         raise ValueError("secret-like content is not allowed in durable memory")

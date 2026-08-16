@@ -32,6 +32,7 @@ dependencies = [
 Homepage = "https://github.com/jollyzachary/mneme-memory-mcp"
 Repository = "https://github.com/jollyzachary/mneme-memory-mcp"
 Issues = "https://github.com/jollyzachary/mneme-memory-mcp/issues"
+Security = "https://github.com/jollyzachary/mneme-memory-mcp/security/policy"
 
 [project.optional-dependencies]
 dev = [

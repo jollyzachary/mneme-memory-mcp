@@ -62,9 +62,10 @@ The continuity layer can:
 - write structured handoffs for later sessions.
 
 Automatic capture never promotes a fact directly into trusted context.
-Suspected prompt injection is quarantined, secret-like content is redacted or
-rejected, and automated capture remains review-only. Unreviewed candidates stay
-out of default search, list, and prompt context.
+Suspected prompt injection is quarantined, conversation capture applies
+credential redaction, and secret-like durable fact writes are rejected.
+Automated capture remains review-only, and unreviewed candidates stay out of
+default search, list, and prompt context.
 
 Install the global profile:
 

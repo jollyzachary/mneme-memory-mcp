@@ -81,9 +81,10 @@ unavailable.
 
 ## Safety and governance
 
-- Storage is local-only.
+- Mneme's durable store remains on the local machine by default.
 - SQLite uses WAL, a busy timeout, and restrictive local file permissions.
-- Secret-like material is rejected before persistence.
+- Secret-like durable fact writes are rejected; conversation capture applies
+  credential redaction before episodic storage.
 - Prompt-injection-like material is quarantined.
 - Automated memories can be reviewed, promoted, or rejected without deleting
   their audit trail.
