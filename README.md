@@ -80,6 +80,42 @@ Handoffs record the goal, current state, decisions, blockers, evidence, and next
 steps. They provide continuity without copying an entire transcript into the
 next session.
 
+## Give this to your AI agent
+
+Paste the prompt below into a local coding agent with terminal access. It tells
+the agent to use Mneme's installer, preserve existing data, and verify the
+connection when setup is complete.
+
+```text
+Install and configure Mneme Memory MCP from
+https://github.com/jollyzachary/mneme-memory-mcp on this computer.
+
+1. Read README.md, docs/continuity.md, and the installer help for this operating
+   system before changing anything.
+2. Inspect any existing Mneme installation, MNEME_HOME value, and MCP client
+   configuration. Preserve existing memory and unrelated configuration. Do not
+   print memory contents, credentials, or secrets.
+3. Use the global profile unless I request isolated project memory or a
+   server-only installation. If an existing setup makes that choice unsafe,
+   stop and explain the conflict.
+4. Clone the repository and use its provided installer:
+   - macOS or Linux: ./scripts/install.sh --profile global
+   - Windows PowerShell: powershell -ExecutionPolicy Bypass -File
+     .\scripts\install.ps1 -Profile global
+   Change only the profile argument when a different profile is required. Do
+   not replace the installer with a custom setup unless the installer fails.
+5. Configure the supported MCP clients already installed on this computer. Do
+   not install unrelated agent runtimes or enable PostgreSQL retrieval or agent
+   delegation unless I ask.
+6. Run the installed mneme-memory-doctor and mneme-memory-continuity status
+   commands. Confirm the selected profile, memory home, server command, and each
+   configured client. Tell me which applications must restart, then give me one
+   harmless store-and-recall check I can use after the restart.
+
+Stop before overwriting an existing installation, moving a memory home that
+contains data, or replacing client configuration you cannot preserve.
+```
+
 ## Quick start
 
 ```bash
