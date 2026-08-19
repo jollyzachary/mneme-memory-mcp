@@ -296,7 +296,11 @@ def memory_links(
 def memory_unlink(relation_id: int) -> str:
     """Remove one explicit relationship without removing either fact."""
 
-    return "removed" if store().unlink(relation_id) else f"relation {relation_id} not found"
+    return (
+        "removed"
+        if store().unlink(relation_id)
+        else f"relation {relation_id} not found"
+    )
 
 
 @mcp.tool()

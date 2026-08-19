@@ -9,7 +9,7 @@ if [ ! -s "$app_password_file" ]; then
   exit 1
 fi
 
-app_password="$(tr -d '\r\n' < "$app_password_file")"
+app_password="$(tr -d '\r\n' <"$app_password_file")"
 
 psql --set=ON_ERROR_STOP=1 \
   --username "$POSTGRES_USER" \

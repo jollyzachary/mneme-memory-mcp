@@ -756,7 +756,9 @@ def _validate_generated_paths(paths: ContinuityPaths) -> None:
     for path in paths.__dict__.values():
         value = str(path)
         if any(character in value for character in forbidden):
-            raise ValueError(f"unsafe character in generated configuration path: {value!r}")
+            raise ValueError(
+                f"unsafe character in generated configuration path: {value!r}"
+            )
 
 
 def _ok(value: bool) -> str:
@@ -770,9 +772,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    install = subparsers.add_parser(
-        "install", help="Install client continuity."
-    )
+    install = subparsers.add_parser("install", help="Install client continuity.")
     install.add_argument("--memory-home", type=Path, default=None)
     install.add_argument("--bin-dir", type=Path, default=None)
 

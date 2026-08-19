@@ -13,7 +13,9 @@ class HygieneTest(unittest.TestCase):
 
     def test_tool_call_markup_is_stripped(self) -> None:
         # A leaked tool-call boundary must never be stored.
-        dirty = 'Release notes are required.</content> <parameter name="category">project'
+        dirty = (
+            'Release notes are required.</content> <parameter name="category">project'
+        )
         self.assertEqual(_normalize_content(dirty), "Release notes are required.")
 
         store = self.make_store()
@@ -32,7 +34,9 @@ class HygieneTest(unittest.TestCase):
             category="user_pref",
         )
         for i in range(150):
-            store.add_fact(f"capture noise number {i}", source="capture", scope="global")
+            store.add_fact(
+                f"capture noise number {i}", source="capture", scope="global"
+            )
 
         store.consolidate()
         user_md = store.read_markdown("user")
@@ -42,8 +46,17 @@ class HygieneTest(unittest.TestCase):
     def test_capture_facts_excluded_from_working_set(self) -> None:
         # Capture stays reviewable but does not enter the generated working set.
         store = self.make_store()
-        store.add_fact("curated project decision", source="manual", category="project", scope="project")
-        store.add_fact("[distilled claude memory] raw transcript dump", source="capture", scope="global")
+        store.add_fact(
+            "curated project decision",
+            source="manual",
+            category="project",
+            scope="project",
+        )
+        store.add_fact(
+            "[distilled claude memory] raw transcript dump",
+            source="capture",
+            scope="global",
+        )
         store.consolidate()
 
         memory_md = store.read_markdown("memory")
@@ -66,13 +79,19 @@ class HygieneTest(unittest.TestCase):
                     "SELECT COUNT(*) FROM events WHERE event_type='episodic.add'"
                 ).fetchone()[0]
 
-        store.add_episodic(source="claude", session_id="s1", role="user", text="hello world snippet")
+        store.add_episodic(
+            source="claude", session_id="s1", role="user", text="hello world snippet"
+        )
         self.assertEqual(event_count(), 1)
         # Repeated content does not create another event.
-        store.add_episodic(source="claude", session_id="s1", role="user", text="hello world snippet")
+        store.add_episodic(
+            source="claude", session_id="s1", role="user", text="hello world snippet"
+        )
         self.assertEqual(event_count(), 1)
         # prune_events keeps the table bounded.
-        self.assertGreaterEqual(store.prune_events(keep_recent=0, max_age_days=99999), 0)
+        self.assertGreaterEqual(
+            store.prune_events(keep_recent=0, max_age_days=99999), 0
+        )
 
     def test_repair_cleans_existing_rows(self) -> None:
         store = self.make_store()
@@ -87,7 +106,10 @@ class HygieneTest(unittest.TestCase):
         changed = store.repair_corrupted_content()
         self.assertGreaterEqual(changed, 1)
         self.assertFalse(
-            any("</content>" in f.content for f in store.list(limit=100, scope="project"))
+            any(
+                "</content>" in f.content
+                for f in store.list(limit=100, scope="project")
+            )
         )
 
 

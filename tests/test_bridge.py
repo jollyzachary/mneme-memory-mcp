@@ -16,7 +16,6 @@ from mneme_memory_mcp.bridge import (
 )
 from mneme_memory_mcp.store import SharedMemoryStore
 
-
 FAKE_AGENT = """#!/usr/bin/env python3
 import os
 import sys
@@ -34,7 +33,9 @@ class AgentBridgeTest(unittest.TestCase):
             script = root / f"{name}_fake.py"
             script.write_text(FAKE_AGENT, encoding="utf-8")
             path = root / f"{name}.cmd"
-            path.write_text(f'@echo off\r\n"{sys.executable}" "{script}" %*\r\n', encoding="utf-8")
+            path.write_text(
+                f'@echo off\r\n"{sys.executable}" "{script}" %*\r\n', encoding="utf-8"
+            )
             return
 
         path = root / name
@@ -98,7 +99,9 @@ class AgentBridgeTest(unittest.TestCase):
                     "MNEME_BRIDGE_ROOT": str(root),
                 },
             ):
-                result = delegate_to_codex("review this", cwd=str(root), sandbox="read-only")
+                result = delegate_to_codex(
+                    "review this", cwd=str(root), sandbox="read-only"
+                )
 
         self.assertEqual(result.returncode, 0)
         self.assertIn("FAKE_AGENT", result.stdout)

@@ -80,11 +80,10 @@ find_python() {
 
   for candidate in python3.12 python3.11 python3.10 python3; do
     if command -v "$candidate" >/dev/null 2>&1; then
-      if "$candidate" - <<'PY'
+      if "$candidate" - <<'PY'; then
 import sys
 raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
 PY
-      then
         command -v "$candidate"
         return 0
       fi
@@ -96,89 +95,89 @@ PY
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --profile)
-      shift
-      if [ "$#" -eq 0 ]; then
-        echo "--profile requires a value: global, project, or server" >&2
-        exit 2
-      fi
-      SETUP_PROFILE="$1"
-      ;;
-    --profile=*)
-      SETUP_PROFILE="${1#*=}"
-      ;;
-    --global-memory)
-      SETUP_PROFILE="global"
-      ;;
-    --project-memory|--env-memory)
-      SETUP_PROFILE="project"
-      ;;
-    --server-only)
-      SETUP_PROFILE="server"
-      ;;
-    --env-file)
-      shift
-      if [ "$#" -eq 0 ]; then
-        echo "--env-file requires a path" >&2
-        exit 2
-      fi
-      ENV_FILE="$1"
-      ;;
-    --env-file=*)
-      ENV_FILE="${1#*=}"
-      ;;
-    --install-dir)
-      shift
-      if [ "$#" -eq 0 ]; then
-        echo "--install-dir requires a path" >&2
-        exit 2
-      fi
-      INSTALL_DIR="$1"
-      VENV_DIR="$INSTALL_DIR/venv"
-      ;;
-    --install-dir=*)
-      INSTALL_DIR="${1#*=}"
-      VENV_DIR="$INSTALL_DIR/venv"
-      ;;
-    --venv-dir)
-      shift
-      if [ "$#" -eq 0 ]; then
-        echo "--venv-dir requires a path" >&2
-        exit 2
-      fi
-      VENV_DIR="$1"
-      ;;
-    --venv-dir=*)
-      VENV_DIR="${1#*=}"
-      ;;
-    --editable)
-      EDITABLE_INSTALL=1
-      ;;
-    --no-embeddings)
-      INSTALL_EMBEDDINGS=0
-      ;;
-    --postgres-retrieval)
-      INSTALL_POSTGRES=1
-      ;;
-    --no-client-config)
-      CONFIGURE_CLIENTS=0
-      ;;
-    --no-continuity)
-      INSTALL_CONTINUITY=0
-      ;;
-    --memory-only)
-      CONFIGURE_CLIENTS=0
-      INSTALL_CONTINUITY=0
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      echo "Unknown argument: $1" >&2
-      usage >&2
+  --profile)
+    shift
+    if [ "$#" -eq 0 ]; then
+      echo "--profile requires a value: global, project, or server" >&2
       exit 2
-      ;;
+    fi
+    SETUP_PROFILE="$1"
+    ;;
+  --profile=*)
+    SETUP_PROFILE="${1#*=}"
+    ;;
+  --global-memory)
+    SETUP_PROFILE="global"
+    ;;
+  --project-memory | --env-memory)
+    SETUP_PROFILE="project"
+    ;;
+  --server-only)
+    SETUP_PROFILE="server"
+    ;;
+  --env-file)
+    shift
+    if [ "$#" -eq 0 ]; then
+      echo "--env-file requires a path" >&2
+      exit 2
+    fi
+    ENV_FILE="$1"
+    ;;
+  --env-file=*)
+    ENV_FILE="${1#*=}"
+    ;;
+  --install-dir)
+    shift
+    if [ "$#" -eq 0 ]; then
+      echo "--install-dir requires a path" >&2
+      exit 2
+    fi
+    INSTALL_DIR="$1"
+    VENV_DIR="$INSTALL_DIR/venv"
+    ;;
+  --install-dir=*)
+    INSTALL_DIR="${1#*=}"
+    VENV_DIR="$INSTALL_DIR/venv"
+    ;;
+  --venv-dir)
+    shift
+    if [ "$#" -eq 0 ]; then
+      echo "--venv-dir requires a path" >&2
+      exit 2
+    fi
+    VENV_DIR="$1"
+    ;;
+  --venv-dir=*)
+    VENV_DIR="${1#*=}"
+    ;;
+  --editable)
+    EDITABLE_INSTALL=1
+    ;;
+  --no-embeddings)
+    INSTALL_EMBEDDINGS=0
+    ;;
+  --postgres-retrieval)
+    INSTALL_POSTGRES=1
+    ;;
+  --no-client-config)
+    CONFIGURE_CLIENTS=0
+    ;;
+  --no-continuity)
+    INSTALL_CONTINUITY=0
+    ;;
+  --memory-only)
+    CONFIGURE_CLIENTS=0
+    INSTALL_CONTINUITY=0
+    ;;
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  *)
+    echo "Unknown argument: $1" >&2
+    usage >&2
+    exit 2
+    ;;
   esac
   shift
 done
@@ -206,19 +205,20 @@ run_optional_mcp_command() {
 }
 
 abspath_under_root() {
+  # shellcheck disable=SC2088 # Match a literal ~/ prefix before expanding it.
   case "$1" in
-    "~")
-      printf '%s\n' "$HOME"
-      ;;
-    "~/"*)
-      printf '%s/%s\n' "$HOME" "${1#~/}"
-      ;;
-    /*)
-      printf '%s\n' "$1"
-      ;;
-    *)
-      printf '%s\n' "$ROOT/$1"
-      ;;
+  "~")
+    printf '%s\n' "$HOME"
+    ;;
+  "~/"*)
+    printf '%s/%s\n' "$HOME" "${1#~/}"
+    ;;
+  /*)
+    printf '%s\n' "$1"
+    ;;
+  *)
+    printf '%s\n' "$ROOT/$1"
+    ;;
   esac
 }
 
@@ -243,19 +243,19 @@ EOF
     printf 'Select 1, 2, or 3: '
     read -r choice
     case "$choice" in
-      1|global|g)
-        SETUP_PROFILE="global"
-        ;;
-      2|project|p|env)
-        SETUP_PROFILE="project"
-        ;;
-      3|server|s|manual)
-        SETUP_PROFILE="server"
-        ;;
-      *)
-        echo "Unknown selection: $choice" >&2
-        exit 2
-        ;;
+    1 | global | g)
+      SETUP_PROFILE="global"
+      ;;
+    2 | project | p | env)
+      SETUP_PROFILE="project"
+      ;;
+    3 | server | s | manual)
+      SETUP_PROFILE="server"
+      ;;
+    *)
+      echo "Unknown selection: $choice" >&2
+      exit 2
+      ;;
     esac
   elif [ -z "$SETUP_PROFILE" ]; then
     cat >&2 <<'EOF'
@@ -273,13 +273,13 @@ EOF
   fi
 
   case "$SETUP_PROFILE" in
-    global|project|server)
-      ;;
-    *)
-      echo "Unknown profile: $SETUP_PROFILE" >&2
-      echo "Use --profile global, --profile project, or --profile server." >&2
-      exit 2
-      ;;
+  global | project | server)
+    ;;
+  *)
+    echo "Unknown profile: $SETUP_PROFILE" >&2
+    echo "Use --profile global, --profile project, or --profile server." >&2
+    exit 2
+    ;;
   esac
 
 }
@@ -327,7 +327,7 @@ ensure_project_env() {
   mkdir -p "$(dirname "$ENV_FILE")"
 
   if [ ! -f "$ENV_FILE" ]; then
-    printf '# Mneme project-scoped memory\nMNEME_HOME=%s\n' "$PROJECT_MEMORY_HOME" > "$ENV_FILE"
+    printf '# Mneme project-scoped memory\nMNEME_HOME=%s\n' "$PROJECT_MEMORY_HOME" >"$ENV_FILE"
     return 0
   fi
 
@@ -335,7 +335,7 @@ ensure_project_env() {
     {
       printf '\n# Mneme project-scoped memory\n'
       printf 'MNEME_HOME=%s\n' "$PROJECT_MEMORY_HOME"
-    } >> "$ENV_FILE"
+    } >>"$ENV_FILE"
   fi
 }
 
@@ -344,33 +344,33 @@ apply_profile() {
   VENV_DIR="$(abspath_under_root "$VENV_DIR")"
 
   case "$SETUP_PROFILE" in
-    global)
-      MEMORY_HOME="$GLOBAL_MEMORY_HOME"
-      MCP_COMMAND="$VENV_DIR/bin/mneme-memory-mcp"
-      MCP_ARGS=()
-      MCP_STATIC_ENV=1
-      ;;
-    project)
-      ensure_project_env
-      MEMORY_HOME="$(read_env_memory_home)"
-      INSTALL_CONTINUITY=0
-      MCP_COMMAND="$VENV_DIR/bin/mneme-memory-env-mcp"
-      MCP_ARGS=(--env-file "$ENV_FILE" --default-home "$PROJECT_MEMORY_HOME")
-      MCP_STATIC_ENV=0
-      ;;
-    server)
-      MEMORY_HOME="$GLOBAL_MEMORY_HOME"
-      CONFIGURE_CLIENTS=0
-      INSTALL_CONTINUITY=0
-      MCP_COMMAND="$VENV_DIR/bin/mneme-memory-mcp"
-      MCP_ARGS=()
-      MCP_STATIC_ENV=1
-      ;;
-    *)
-      echo "Unknown profile: $SETUP_PROFILE" >&2
-      echo "Use --profile global, --profile project, or --profile server." >&2
-      exit 2
-      ;;
+  global)
+    MEMORY_HOME="$GLOBAL_MEMORY_HOME"
+    MCP_COMMAND="$VENV_DIR/bin/mneme-memory-mcp"
+    MCP_ARGS=()
+    MCP_STATIC_ENV=1
+    ;;
+  project)
+    ensure_project_env
+    MEMORY_HOME="$(read_env_memory_home)"
+    INSTALL_CONTINUITY=0
+    MCP_COMMAND="$VENV_DIR/bin/mneme-memory-env-mcp"
+    MCP_ARGS=(--env-file "$ENV_FILE" --default-home "$PROJECT_MEMORY_HOME")
+    MCP_STATIC_ENV=0
+    ;;
+  server)
+    MEMORY_HOME="$GLOBAL_MEMORY_HOME"
+    CONFIGURE_CLIENTS=0
+    INSTALL_CONTINUITY=0
+    MCP_COMMAND="$VENV_DIR/bin/mneme-memory-mcp"
+    MCP_ARGS=()
+    MCP_STATIC_ENV=1
+    ;;
+  *)
+    echo "Unknown profile: $SETUP_PROFILE" >&2
+    echo "Use --profile global, --profile project, or --profile server." >&2
+    exit 2
+    ;;
   esac
 
   export MNEME_HOME="$MEMORY_HOME"
@@ -381,11 +381,11 @@ validate_venv_dir() {
   INSTALL_DIR="$("$PYTHON_BIN" -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).expanduser().resolve())' "$INSTALL_DIR")"
   VENV_DIR="$("$PYTHON_BIN" -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).expanduser().resolve())' "$VENV_DIR")"
   case "$VENV_DIR" in
-    "$INSTALL_DIR"/*) ;;
-    *)
-      echo "Refusing venv outside the managed install directory: $VENV_DIR" >&2
-      exit 2
-      ;;
+  "$INSTALL_DIR"/*) ;;
+  *)
+    echo "Refusing venv outside the managed install directory: $VENV_DIR" >&2
+    exit 2
+    ;;
   esac
   if [ "$VENV_DIR" = "$INSTALL_DIR" ]; then
     echo "The venv directory must be a child of the managed install directory." >&2
@@ -576,7 +576,11 @@ EXTRAS=()
 [ "$INSTALL_POSTGRES" = "1" ] && EXTRAS+=(postgres)
 PACKAGE_SPEC="$ROOT"
 if [ "${#EXTRAS[@]}" -gt 0 ]; then
-  PACKAGE_SPEC="$ROOT[$(IFS=,; echo "${EXTRAS[*]}")]"
+  EXTRAS_CSV=$(
+    IFS=,
+    echo "${EXTRAS[*]}"
+  )
+  PACKAGE_SPEC="${ROOT}[${EXTRAS_CSV}]"
 fi
 if [ "$EDITABLE_INSTALL" = "1" ]; then
   "$VENV_DIR/bin/python" -m pip install -e "$PACKAGE_SPEC"
@@ -590,8 +594,8 @@ if [ "$INSTALL_EMBEDDINGS" = "1" ]; then
 fi
 
 mkdir -p "$MEMORY_HOME/memories"
-[ -f "$MEMORY_HOME/memories/USER.md" ] || printf '# USER.md\n\n' > "$MEMORY_HOME/memories/USER.md"
-[ -f "$MEMORY_HOME/memories/MEMORY.md" ] || printf '# MEMORY.md\n\n' > "$MEMORY_HOME/memories/MEMORY.md"
+[ -f "$MEMORY_HOME/memories/USER.md" ] || printf '# USER.md\n\n' >"$MEMORY_HOME/memories/USER.md"
+[ -f "$MEMORY_HOME/memories/MEMORY.md" ] || printf '# MEMORY.md\n\n' >"$MEMORY_HOME/memories/MEMORY.md"
 chmod 700 "$MEMORY_HOME" "$MEMORY_HOME/memories"
 chmod 600 "$MEMORY_HOME/memories/USER.md" "$MEMORY_HOME/memories/MEMORY.md"
 

@@ -315,9 +315,7 @@ class SharedMemoryStoreTest(unittest.TestCase):
             source="manual",
             trust_score=0.50,
         )
-        hits = store.search(
-            "widget parser", scope="global", include_candidates=True
-        )
+        hits = store.search("widget parser", scope="global", include_candidates=True)
         self.assertEqual(hits[0].fact_id, manual_id)
         self.assertEqual(hits[0].source, "manual")
         self.assertFalse(
@@ -424,7 +422,9 @@ class SharedMemoryStoreTest(unittest.TestCase):
         store_mod._embed_model_failed = True
         try:
             store = self.make_store()
-            store.add_fact("The speech service uses the Standard profile.", source="manual")
+            store.add_fact(
+                "The speech service uses the Standard profile.", source="manual"
+            )
             hits = store.search("speech service", scope="global")
             self.assertEqual(
                 hits[0].content, "The speech service uses the Standard profile."

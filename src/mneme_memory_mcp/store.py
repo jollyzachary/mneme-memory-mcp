@@ -176,9 +176,7 @@ def _configure_global_runtime(home: Path) -> None:
     if home.expanduser().resolve() != global_home.resolve():
         return
     env_file = Path(
-        os.environ.get(
-            "MNEME_GLOBAL_ENV_FILE", "~/.config/mneme-memory/env"
-        )
+        os.environ.get("MNEME_GLOBAL_ENV_FILE", "~/.config/mneme-memory/env")
     ).expanduser()
     if env_file.is_file():
         configure_environment(env_file, global_home)
@@ -285,9 +283,7 @@ class SharedMemoryStore:
             _harden_private_path(self.memory_dir, directory=True)
             _harden_private_path(self.db_path.parent, directory=True)
             with closing(self.connect()) as conn:
-                current_version = int(
-                    conn.execute("PRAGMA user_version").fetchone()[0]
-                )
+                current_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
                 if current_version < _SCHEMA_VERSION:
                     conn.executescript(SCHEMA)
                     conn.commit()
@@ -326,9 +322,10 @@ class SharedMemoryStore:
         destination = backup_dir / f"mneme-auto-{stamp}.db"
         temporary = backup_dir / f".{destination.name}.{os.getpid()}.tmp"
         try:
-            with closing(self.connect()) as source, closing(
-                sqlite3.connect(str(temporary))
-            ) as target:
+            with (
+                closing(self.connect()) as source,
+                closing(sqlite3.connect(str(temporary))) as target,
+            ):
                 source.backup(target)
                 target.commit()
                 integrity = str(target.execute("PRAGMA integrity_check").fetchone()[0])
@@ -1487,7 +1484,7 @@ class SharedMemoryStore:
                        relation_type, weight, source, evidence,
                        created_at, updated_at
                 FROM fact_relations
-                WHERE scope IN ({','.join('?' for _ in scopes)})
+                WHERE scope IN ({",".join("?" for _ in scopes)})
                   {fact_clause}
                 ORDER BY updated_at DESC, relation_id DESC
                 LIMIT ?
@@ -1756,7 +1753,7 @@ class SharedMemoryStore:
                 SELECT {_fact_select_sql()}
                 FROM facts
                 WHERE superseded_by IS NULL AND state = 'trusted' AND {where}
-                  AND scope IN ({','.join('?' for _ in scopes)})
+                  AND scope IN ({",".join("?" for _ in scopes)})
                 ORDER BY importance DESC, helpful_count DESC,
                          reinforcement_count DESC, updated_at DESC, fact_id DESC
                 LIMIT 200
@@ -1834,9 +1831,7 @@ class SharedMemoryStore:
                     (fact_id, fact_id),
                 ).fetchall()
                 row_ids = [int(row["fact_id"]) for row in rows]
-                revisions = self._postgres_sync_revisions(
-                    conn, "fact", row_ids
-                )
+                revisions = self._postgres_sync_revisions(conn, "fact", row_ids)
             mirrors: list[dict[str, object]] = []
             embeddings: dict[int, Sequence[float]] = {}
             for row in rows:
@@ -1886,7 +1881,9 @@ class SharedMemoryStore:
             self._clear_postgres_sync_items("fact", revisions)
             return True
         except Exception as exc:  # noqa: BLE001 - SQLite remains authoritative
-            _LOGGER.warning("could not remove fact %s from PostgreSQL: %s", fact_id, exc)
+            _LOGGER.warning(
+                "could not remove fact %s from PostgreSQL: %s", fact_id, exc
+            )
             return False
 
     def _delete_postgres_relation(self, relation_id: int) -> bool:
@@ -1917,7 +1914,7 @@ class SharedMemoryStore:
             SELECT item_id, revision
             FROM postgres_sync_queue
             WHERE item_type = ?
-              AND item_id IN ({','.join('?' for _ in item_ids)})
+              AND item_id IN ({",".join("?" for _ in item_ids)})
             """,
             (item_type, *[int(item_id) for item_id in item_ids]),
         ).fetchall()
@@ -2518,9 +2515,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if prior_version < 12:
         queue_columns = {
             row["name"]
-            for row in conn.execute(
-                "PRAGMA table_info(postgres_sync_queue)"
-            ).fetchall()
+            for row in conn.execute("PRAGMA table_info(postgres_sync_queue)").fetchall()
         }
         queue_additions = {
             "attempts": "INTEGER NOT NULL DEFAULT 0",
@@ -2530,9 +2525,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         }
         for name, ddl in queue_additions.items():
             if name not in queue_columns:
-                conn.execute(
-                    f"ALTER TABLE postgres_sync_queue ADD COLUMN {name} {ddl}"
-                )
+                conn.execute(f"ALTER TABLE postgres_sync_queue ADD COLUMN {name} {ddl}")
         conn.execute(
             """
             UPDATE postgres_sync_queue
@@ -3146,9 +3139,7 @@ def _normalize_key(key: str | None) -> str:
 
 
 def _normalize_relation_type(value: str | None) -> str:
-    relation = re.sub(
-        r"[^a-z0-9_.:-]+", "-", (value or "").strip().lower()
-    ).strip("-")
+    relation = re.sub(r"[^a-z0-9_.:-]+", "-", (value or "").strip().lower()).strip("-")
     if not relation:
         raise ValueError("relation_type must not be empty")
     if len(relation) > 120:

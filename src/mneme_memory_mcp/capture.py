@@ -33,7 +33,9 @@ SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bAIza[0-9A-Za-z_-]{30,}\b"), "AIza[redacted]"),
     (re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{20,}\b"), "xox-[redacted]"),
     (
-        re.compile(r"\b(?:eyJ[A-Za-z0-9_-]+)\.(?:[A-Za-z0-9_-]+)\.(?:[A-Za-z0-9_-]+)\b"),
+        re.compile(
+            r"\b(?:eyJ[A-Za-z0-9_-]+)\.(?:[A-Za-z0-9_-]+)\.(?:[A-Za-z0-9_-]+)\b"
+        ),
         "[JWT redacted]",
     ),
     (

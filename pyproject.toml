@@ -37,7 +37,8 @@ Security = "https://github.com/jollyzachary/mneme-memory-mcp/security/policy"
 [project.optional-dependencies]
 dev = [
   "build>=1.2",
-  "pytest>=8"
+  "pytest>=8",
+  "ruff>=0.16,<1"
 ]
 # Local hybrid retrieval. Without these, search() stays FTS5+LIKE only.
 embeddings = [
@@ -60,3 +61,13 @@ mneme-memory-doctor = "mneme_memory_mcp.doctor:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mneme_memory_mcp"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.ruff.format]
+quote-style = "double"

@@ -53,10 +53,15 @@ class GovernanceTest(unittest.TestCase):
         """Agent-private facts stay outside shared retrieval scopes."""
 
         store, _ = self.make_store()
-        store.add("SECRET-XYZ deployment key note", target="memory", scope="agent-private")
+        store.add(
+            "SECRET-XYZ deployment key note", target="memory", scope="agent-private"
+        )
         for sc in ("global", "project", "handoff"):
             self.assertFalse(
-                any("SECRET-XYZ" in f.content for f in store.search("SECRET-XYZ", scope=sc)),
+                any(
+                    "SECRET-XYZ" in f.content
+                    for f in store.search("SECRET-XYZ", scope=sc)
+                ),
                 f"agent-private leaked at scope={sc}",
             )
 
@@ -127,8 +132,7 @@ class GovernanceTest(unittest.TestCase):
             tags="strategy,desktop-ui",
         )
         hits = [
-            f.content
-            for f in store.search("desktop control input", scope="global")
+            f.content for f in store.search("desktop control input", scope="global")
         ]
         self.assertTrue(
             any("native event bridge" in c for c in hits),

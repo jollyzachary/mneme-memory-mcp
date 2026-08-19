@@ -113,7 +113,9 @@ def delegate_to_codex(
         # The shared store may live outside the workspace. Add its home as a
         # writable root because store initialization can perform migrations.
         writable_roots = json.dumps([str(resolve_home())])
-        command.extend(["-c", f"sandbox_workspace_write.writable_roots={writable_roots}"])
+        command.extend(
+            ["-c", f"sandbox_workspace_write.writable_roots={writable_roots}"]
+        )
     if model:
         command.extend(["--model", model])
     command.append(_with_memory_prompt(prompt, "Codex"))
@@ -233,9 +235,10 @@ def _run(
     env: dict[str, str] | None = None,
 ) -> AgentRun:
     command = _windows_batch_safe_command(command)
-    with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as stdout_file, tempfile.TemporaryFile(
-        mode="w+t", encoding="utf-8"
-    ) as stderr_file:
+    with (
+        tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as stdout_file,
+        tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as stderr_file,
+    ):
         try:
             result = subprocess.run(
                 command,

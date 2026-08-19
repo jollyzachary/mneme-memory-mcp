@@ -30,9 +30,7 @@ def _live_db_candidates() -> list[Path]:
     if raw:
         candidates.append(Path(raw).expanduser().resolve())
     home_raw = (
-        os.environ.get("MNEME_HOME")
-        or os.environ.get("HERMES_HOME")
-        or "~/.hermes"
+        os.environ.get("MNEME_HOME") or os.environ.get("HERMES_HOME") or "~/.hermes"
     )
     candidates.append((Path(home_raw).expanduser() / "memory_store.db").resolve())
     candidates.append(Path("~/.hermes/memory_store.db").expanduser().resolve())

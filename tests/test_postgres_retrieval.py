@@ -102,7 +102,9 @@ class PostgresConfigurationTest(unittest.TestCase):
                     str(root / "secret"),
                 )
 
-    def test_postgres_mode_falls_back_to_sqlite_when_service_is_unavailable(self) -> None:
+    def test_postgres_mode_falls_back_to_sqlite_when_service_is_unavailable(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = SharedMemoryStore(home=Path(tmp))
             with patch.dict(
@@ -133,9 +135,7 @@ class PostgresConfigurationTest(unittest.TestCase):
                     {"MNEME_RETRIEVAL_BACKEND": "postgres"},
                     clear=True,
                 ),
-                patch.object(
-                    store, "_postgres_search_scores", return_value=({}, True)
-                ),
+                patch.object(store, "_postgres_search_scores", return_value=({}, True)),
             ):
                 self.assertEqual(store.search("sentinel", scope="global"), [])
 

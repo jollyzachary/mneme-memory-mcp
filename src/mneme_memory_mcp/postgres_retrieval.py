@@ -112,11 +112,7 @@ class PostgresSettings:
             ),
             graph_statement_timeout_ms=max(
                 100,
-                int(
-                    os.environ.get(
-                        "MNEME_POSTGRES_GRAPH_STATEMENT_TIMEOUT_MS", "750"
-                    )
-                ),
+                int(os.environ.get("MNEME_POSTGRES_GRAPH_STATEMENT_TIMEOUT_MS", "750")),
             ),
         )
 
@@ -180,7 +176,9 @@ class PostgresRetrievalPlane:
 
     @staticmethod
     def _set_scopes(cur: Any, scopes: Sequence[str]) -> None:
-        cur.execute("SELECT set_config('mneme.visible_scopes', %s, true)", (",".join(scopes),))
+        cur.execute(
+            "SELECT set_config('mneme.visible_scopes', %s, true)", (",".join(scopes),)
+        )
 
     def search(
         self,
@@ -201,9 +199,7 @@ class PostgresRetrievalPlane:
                 if lexical:
                     rankings.append((lexical, 1.0))
                 if query_vector:
-                    dense = self._dense_ids(
-                        cur, query_vector, scopes, candidate_limit
-                    )
+                    dense = self._dense_ids(cur, query_vector, scopes, candidate_limit)
                     if dense:
                         rankings.append((dense, 1.0))
 
@@ -427,9 +423,7 @@ class PostgresRetrievalPlane:
         source_keys: list[str] = []
         with self._connect() as conn:
             with conn.cursor() as cur:
-                self._set_scopes(
-                    cur, ("global", "project", "agent-private", "handoff")
-                )
+                self._set_scopes(cur, ("global", "project", "agent-private", "handoff"))
                 for fact in facts:
                     fact_id = int(fact["fact_id"])
                     vector = embeddings.get(fact_id)
@@ -637,9 +631,7 @@ class PostgresRetrievalPlane:
         edge_id = f"supersedes:{fact_id}"
         supersedes_id = fact.get("supersedes_id")
         if supersedes_id is None:
-            cur.execute(
-                "DELETE FROM mneme.memory_edges WHERE edge_id = %s", (edge_id,)
-            )
+            cur.execute("DELETE FROM mneme.memory_edges WHERE edge_id = %s", (edge_id,))
             return
         cur.execute(
             """
@@ -684,9 +676,7 @@ class PostgresRetrievalPlane:
             return 0
         with self._connect() as conn:
             with conn.cursor() as cur:
-                self._set_scopes(
-                    cur, ("global", "project", "agent-private", "handoff")
-                )
+                self._set_scopes(cur, ("global", "project", "agent-private", "handoff"))
                 for relation in relations:
                     cur.execute(
                         """
@@ -744,9 +734,7 @@ class PostgresRetrievalPlane:
     def delete_fact(self, fact_id: int) -> None:
         with self._connect() as conn:
             with conn.cursor() as cur:
-                self._set_scopes(
-                    cur, ("global", "project", "agent-private", "handoff")
-                )
+                self._set_scopes(cur, ("global", "project", "agent-private", "handoff"))
                 cur.execute(
                     "SELECT pgcontext.delete_points(%s, %s)",
                     (COLLECTION, [str(int(fact_id))]),
@@ -758,9 +746,7 @@ class PostgresRetrievalPlane:
     def delete_relation(self, relation_id: int) -> None:
         with self._connect() as conn:
             with conn.cursor() as cur:
-                self._set_scopes(
-                    cur, ("global", "project", "agent-private", "handoff")
-                )
+                self._set_scopes(cur, ("global", "project", "agent-private", "handoff"))
                 cur.execute(
                     "DELETE FROM mneme.memory_edges WHERE edge_id = %s",
                     (f"explicit:{int(relation_id)}",),
@@ -771,9 +757,7 @@ class PostgresRetrievalPlane:
     def rebuild_graph(self) -> None:
         with self._connect() as conn:
             with conn.cursor() as cur:
-                self._set_scopes(
-                    cur, ("global", "project", "agent-private", "handoff")
-                )
+                self._set_scopes(cur, ("global", "project", "agent-private", "handoff"))
                 cur.execute("SELECT * FROM graph.build()")
             conn.commit()
 
@@ -796,9 +780,7 @@ class PostgresRetrievalPlane:
     def health(self) -> dict[str, Any]:
         with self._connect() as conn:
             with conn.cursor() as cur:
-                self._set_scopes(
-                    cur, ("global", "project", "agent-private", "handoff")
-                )
+                self._set_scopes(cur, ("global", "project", "agent-private", "handoff"))
                 cur.execute(
                     """
                     SELECT extname, extversion
@@ -807,7 +789,9 @@ class PostgresRetrievalPlane:
                     ORDER BY extname
                     """
                 )
-                extensions = {str(name): str(version) for name, version in cur.fetchall()}
+                extensions = {
+                    str(name): str(version) for name, version in cur.fetchall()
+                }
                 cur.execute("SELECT COUNT(*) FROM mneme.facts")
                 fact_count = int(cur.fetchone()[0])
                 cur.execute("SELECT COUNT(*) FROM mneme.memory_edges")

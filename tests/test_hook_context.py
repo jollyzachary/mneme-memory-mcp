@@ -13,7 +13,9 @@ class HookContextTest(unittest.TestCase):
         return SharedMemoryStore(home=Path(tempfile.mkdtemp()))
 
     def test_prompt_keywords_drop_stopwords_and_dupes(self) -> None:
-        words = prompt_keywords("Please check the DuckDB catalog data venv, DuckDB again")
+        words = prompt_keywords(
+            "Please check the DuckDB catalog data venv, DuckDB again"
+        )
         self.assertIn("duckdb", words)
         self.assertIn("catalog", words)
         self.assertNotIn("please", words)
@@ -21,14 +23,20 @@ class HookContextTest(unittest.TestCase):
 
     def test_relevant_facts_matched_to_prompt(self) -> None:
         store = self.make_store()
-        store.add("Catalog data lives in Parquet, query via DuckDB venv.", category="project")
+        store.add(
+            "Catalog data lives in Parquet, query via DuckDB venv.", category="project"
+        )
         store.add("Dashboard accent colors are blue and yellow.", category="project")
 
-        context = build_context(store=store, prompt="How do I query the DuckDB catalog data?")
+        context = build_context(
+            store=store, prompt="How do I query the DuckDB catalog data?"
+        )
 
         self.assertIn("## Memories Matched To This Prompt", context)
         self.assertIn("DuckDB venv", context)
-        self.assertNotIn("Dashboard accent colors", context.split("## Memories Matched")[1])
+        self.assertNotIn(
+            "Dashboard accent colors", context.split("## Memories Matched")[1]
+        )
 
     def test_falls_back_to_recent_without_prompt_match(self) -> None:
         store = self.make_store()

@@ -11,9 +11,9 @@ generate_secret() {
     return 0
   fi
   if command -v openssl >/dev/null 2>&1; then
-    openssl rand -base64 36 | tr -d '\n' > "$target"
+    openssl rand -base64 36 | tr -d '\n' >"$target"
   else
-    python3 -c 'import secrets; print(secrets.token_urlsafe(36), end="")' > "$target"
+    python3 -c 'import secrets; print(secrets.token_urlsafe(36), end="")' >"$target"
   fi
   chmod 600 "$target"
 }
